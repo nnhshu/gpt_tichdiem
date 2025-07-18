@@ -1,0 +1,136 @@
+.gpt_lookup_point_wrap {
+    margin: 30px auto;
+    background-color: #f8f8f84f;
+    border-radius: 12px;
+    backdrop-filter: blur(7px);
+    box-shadow: 0 6px 15px rgba(36, 37, 38, 0.08);
+    padding: 16px;
+    max-width: 1300px;
+    border: 1px solid #ebe6e7;
+}
+
+.bizgpt_form_content{
+    max-width: 600px;
+    margin: 0px auto;
+}
+
+.bizgpt_form_content h3 {
+    text-align: center;
+    font-size: 24px;
+    margin-bottom: 20px;
+    font-weight: bold;
+    color: #dd232b;
+    text-transform: uppercase;
+}
+
+.bizgpt_form_content span{
+    color: #000;
+}
+
+#gpt_lookup_point_form input[type="text"] {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #cccccc;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    min-height: 50px;
+    margin-bottom: 0px;
+    box-shadow: none;
+}
+
+#gpt_lookup_point_form input[type="text"]:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+    outline: none;
+}
+
+/* Button submit */
+#gpt_lookup_point_form button {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 0px;
+    margin-right: 0px;
+    margin-top: 16px;
+    background-color: #163d7c;
+    color: #ffffff;
+    padding: 8px 25px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    transition: background 0.3s ease;
+}
+
+#gpt_lookup_point_form button:hover {
+    background: #3730a3;
+}
+
+#tra_cuu_result p {
+    color: #000;
+}
+#tra_cuu_result table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    font-size: 14px;
+}
+
+#tra_cuu_result th,
+#tra_cuu_result td {
+    padding: 12px 15px;
+    border: 1px solid #ddd;
+    text-align: left;
+    color: #000;
+}
+
+#tra_cuu_result th {
+    background-color: #f3f4f6;
+    font-weight: bold;
+    color: #000;
+}
+
+#tra_cuu_result tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+#tra_cuu_result tr:hover {
+    background-color: #f1f5f9;
+}
+
+/* Pagination */
+#pagination {
+    margin-top: 15px;
+    text-align: center;
+}
+
+#pagination a {
+    margin: 0 5px;
+    color: #4f46e5;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+#pagination a:hover {
+    text-decoration: underline;
+}
+
+#pagination span {
+    margin: 0 5px;
+    font-weight: bold;
+    color: #111827;
+}
+
+.tab_tichdiem_wrap .nav li a {
+    color: #000;
+}
+
+.tab_tichdiem_wrap .nav li.active a {
+    background: #163d7c;
+    color: #fff;
+    padding: .2rem 2.5rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all .2s ease-in-out;
+}
