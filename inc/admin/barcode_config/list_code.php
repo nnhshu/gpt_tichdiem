@@ -1,7 +1,15 @@
 <?php
 
-add_action('wp_ajax_gpt_delete_macao', 'gpt_delete_macao');
-function gpt_delete_macao() {
+add_action('wp_ajax_gpt_delete_barcode', 'gpt_delete_barcode');
+add_action('admin_post_gpt_export_barcode_excel', 'gpt_export_barcode_with_image');
+add_action('admin_post_nopriv_gpt_export_barcode_excel', 'gpt_export_barcode_with_image');
+
+require_once plugin_dir_path(__FILE__) . '../../libs/vendor/autoload.php';
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+
+function gpt_delete_barcode() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BARCODE;
 
@@ -22,49 +30,55 @@ function gpt_delete_macao() {
     }
 }
 
-function gpt_export_macao_excel() {
+function gpt_export_barcode_with_image() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BARCODE;
 
-    $where = '1=1';
-    if (!empty($_POST['status'])) {
-        $where .= $wpdb->prepare(" AND status = %s", $_POST['status']);
-    }
-    if (!empty($_POST['branch'])) {
-        $where .= $wpdb->prepare(" AND branch LIKE %s", '%' . $_POST['branch'] . '%');
-    }
+    $rows = $wpdb->get_results("SELECT * FROM $table WHERE status = 'unused' ORDER BY id DESC");
 
-    $results = $wpdb->get_results("SELECT * FROM $table WHERE $where ORDER BY id DESC");
-
-    if (empty($results)) {
+    if (empty($rows)) {
         wp_die('Không có dữ liệu để xuất.');
     }
 
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=danh_sach_barcode_' . date('Ymd_His') . '.csv');
+    $spreadsheet = new Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
 
-    $output = fopen('php://output', 'w');
-    fputcsv($output, array('ID', 'Mã cào', 'Điểm', 'Trạng thái', 'Sản phẩm', 'Ngày tạo'));
+    // Header
+    $headers = ['Mã định danh', "Token - Tráng bạc", 'Điểm', 'Trạng thái', 'Ngày tạo', 'Link QR', 'Link Barcode'];
+    $sheet->fromArray($headers, NULL, 'A1');
 
-    foreach ($results as $row) {
-        fputcsv($output, array(
-            $row->id,
-            $row->barcode,
-            $row->point,
-            $row->status,
-            $row->branch,
-            $row->product,
-            $row->created_at
-        ));
+    $rowIndex = 2;
+    foreach ($rows as $row) {
+        $sheet->setCellValue("A$rowIndex", $row->barcode);
+        $sheet->setCellValue("B$rowIndex", $row->token);
+        $sheet->setCellValue("C$rowIndex", $row->point);
+        $sheet->setCellValue("D$rowIndex", $row->status);
+        $sheet->setCellValue("E$rowIndex", $row->created_at);
+        $sheet->setCellValue("F$rowIndex", $row->qr_code_url);
+        $sheet->setCellValue("G$rowIndex", $row->barcode_url);
+        $rowIndex++;
     }
 
-    fclose($output);
+    // Header Excel để xuất file
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="ma_cao_export_links.xlsx"');
+    header('Cache-Control: max-age=0');
+
+    $writer = new Xlsx($spreadsheet);
+    $writer->save('php://output');
     exit;
 }
 
-function gpt_macao_list_page() {
+// Hàm hỗ trợ tải ảnh từ URL về tạm để nhúng
+function download_image_temp($url) {
+    $temp_file = tempnam(sys_get_temp_dir(), 'img');
+    file_put_contents($temp_file, file_get_contents($url));
+    return $temp_file;
+}
+
+function gpt_barcode_list_page() {
     if (isset($_POST['gpt_export_excel'])) {
-        gpt_export_macao_excel();
+        gpt_export_barcode_excel();
         exit;
     }
 
@@ -72,15 +86,21 @@ function gpt_macao_list_page() {
     $table = BIZGPT_PLUGIN_WP_BARCODE;
 
     $paged = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
-    $per_page = 100;
+    $per_page = 20;
     $offset = ($paged - 1) * $per_page;
 
     $where = '1=1';
     if (!empty($_GET['status'])) {
         $where .= $wpdb->prepare(" AND status = %s", $_GET['status']);
     }
-    if (!empty($_GET['branch'])) {
-        $where .= $wpdb->prepare(" AND branch LIKE %s", '%' . $_GET['branch'] . '%');
+    if (!empty($_GET['product_id'])) {
+        $where .= $wpdb->prepare(" AND product_id = %s", $_GET['product_id']);
+    }
+    if (!empty($_GET['session'])) {
+        $where .= $wpdb->prepare(" AND session = %s", $_GET['session']);
+    }
+    if (!empty($_GET['from_date']) && !empty($_GET['to_date'])) {
+        $where .= $wpdb->prepare(" AND DATE(created_at) BETWEEN %s AND %s", $_GET['from_date'], $_GET['to_date']);
     }
 
     $results = $wpdb->get_results($wpdb->prepare("SELECT * FROM $table WHERE $where ORDER BY id DESC LIMIT %d OFFSET %d", $per_page, $offset));
@@ -88,177 +108,101 @@ function gpt_macao_list_page() {
     $total_pages = ceil($total / $per_page);
 
     ?>
-    <style>
-        :root{
-            --primary-color-admin: #164eaf;
-        }
-        .list_code_wrap{
-            margin-top: 30px;
-            background: #fff;
-            padding: 20px;
-            border: 1px solid #ccd0d4;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-        .list_code_wrap h1 {
-            margin-top: 0;
-            font-size: 20px;
-            color: var(--primary-color-admin);
-        }
+    <h1>Danh sách mã định danh</h1>
+    <div class="ux-row" style="margin-bottom: 20px;">
+        <form method="get" class="row form-row" style="align-items: flex-end; width: 100%;">
+            <input type="hidden" name="page" value="gpt-config-barcode">
+            
+            <!-- Trạng thái -->
+            <div class="col large-2">
+                <label>Trạng thái:</label>
+                <select name="status" class="gpt-select2">
+                    <option value="">Tất cả</option>
+                    <option value="pending" <?php selected($_GET['status'] ?? '', 'pending'); ?>>Chờ duyệt</option>
+                    <option value="unused" <?php selected($_GET['status'] ?? '', 'unused'); ?>>Chưa sử dụng</option>
+                    <option value="used" <?php selected($_GET['status'] ?? '', 'used'); ?>>Đã sử dụng</option>
+                </select>
+            </div>
 
-        .ux-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            border-top: 1px solid var(--primary-color-admin);
-            border-bottom: 1px solid var(--primary-color-admin);
-            padding: 16px 0px;
-        }
+            <!-- Sản phẩm -->
+            <div class="col large-3">
+                <label>Sản phẩm:</label>
+                <select name="product_id" class="gpt-select2">
+                    <option value="">Tất cả</option>
+                    <?php
+                    $products = wc_get_products(['limit' => -1]);
+                    foreach ($products as $product) {
+                        $selected = ($_GET['product_id'] ?? '') == $product->get_id() ? 'selected' : '';
+                        echo "<option value='{$product->get_id()}' $selected>{$product->get_name()}</option>";
+                    }
+                    ?>
+                </select>
+            </div>
 
-        .ux-row .col {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
+            <!-- Phiên -->
+            <div class="col large-2">
+                <label>Phiên:</label>
+                <select name="session" class="gpt-select2">
+                    <option value="">Tất cả</option>
+                    <?php
+                    $sessions = $wpdb->get_col("SELECT DISTINCT session FROM $table ORDER BY session DESC");
+                    foreach ($sessions as $session) {
+                        $selected = ($_GET['session'] ?? '') == $session ? 'selected' : '';
+                        echo "<option value='{$session}' $selected>{$session}</option>";
+                    }
+                    ?>
+                </select>
+            </div>
 
-        .ux-row select,
-        .ux-row input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-        }
+            <!-- Khoảng ngày -->
+            <div class="col large-2">
+                <label>Từ ngày:</label>
+                <input type="date" name="from_date" value="<?php echo esc_attr($_GET['from_date'] ?? ''); ?>" class="regular-text">
+            </div>
+            <div class="col large-2">
+                <label>Đến ngày:</label>
+                <input type="date" name="to_date" value="<?php echo esc_attr($_GET['to_date'] ?? ''); ?>" class="regular-text">
+            </div>
 
-        .ux-row button {
-            font-size: 14px !important;
-            border-radius: 6px !important;
-            cursor: pointer !important;
-            background-color: var(--primary-color-admin) !important;
-            padding: 6px 16px !important;
-            border-radius: 8px !important;
-            width: max-content !important;
-            border: 0px !important;
-        }
-
-        #gpt_export_excel{
-            font-size: 14px !important;
-            border-radius: 6px !important;
-            cursor: pointer !important;
-            background-color: #22c55e !important;
-            padding: 6px 16px !important;
-            border-radius: 8px !important;
-            width: max-content !important;
-            border: 0px !important;
-        }
-
-        #gpt_delete_selected{
-            font-size: 14px !important;
-            border-radius: 6px !important;
-            cursor: pointer !important;
-            background-color: #ef4444 !important;
-            padding: 6px 16px !important;
-            border-radius: 8px !important;
-            width: max-content !important;
-            border: 0px !important;
-        }
-
-        #gpt_macao_table th,
-        #gpt_macao_table td {
-            padding: 12px 15px;
-            text-align: left;
-        }
-
-        #gpt_macao_table tr:hover {
-            background: #f9f9f9;
-        }
-
-        .gpt-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: #fff;
-        }
-
-        .gpt-badge-success {
-            background-color: #22c55e;
-        }
-
-        .gpt-badge-warning {
-            background-color: #EB5B00;
-        }
-
-        .gpt-badge-danger {
-            background-color: #ef4444;
-        }
-
-        .tablenav-pages {
-            margin-top: 20px;
-        }
-
-        .updates-table td input, 
-        .widefat tfoot td input, 
-        .widefat th input, 
-        .widefat thead td input {
-            margin: 0 !important;
-        }
-
-    </style>
-    <div class="list_code_wrap">
-        <h1>Danh sách mã cào</h1>
-        <form method="post" id="gpt_export_form" style="display:none;">
-            <input type="hidden" name="gpt_export_excel" value="1">
-            <input type="hidden" name="status" value="<?php echo esc_attr($_GET['status'] ?? ''); ?>">
-            <input type="hidden" name="branch" value="<?php echo esc_attr($_GET['branch'] ?? ''); ?>">
+            <div class="col large-1">
+                <button type="submit" class="button primary">Lọc</button>
+            </div>
         </form>
 
-        <div class="ux-row" style="margin-bottom: 20px;">
-            <form method="get" class="row form-row" style="align-items: flex-end; width: 100%;">
-                <input type="hidden" name="page" value="gpt-danh-sach-ma-cao">
-                <div class="col large-4">
-                    <label>Lọc theo trạng thái:</label>
-                    <select name="status" class="form-select" style="margin-bottom: 10px;">
-                        <option value="">Tất cả</option>
-                        <option value="pending" <?php selected($_GET['status'] ?? '', 'pending'); ?>>Chờ duyệt</option>
-                        <option value="unused" <?php selected($_GET['status'] ?? '', 'unused'); ?>>Chưa sử dụng</option>
-                        <option value="used" <?php selected($_GET['status'] ?? '', 'used'); ?>>Đã sử dụng</option>
-                    </select>
-                    <button type="submit" class="button primary">Lọc</button>
-                </div>
-            </form>
-        </div>
-
-        <button type="button" id="gpt_delete_selected" class="button alert">
-            Xóa các mã đã chọn
-            <span id="gpt_delete_loading" style="display:none; margin-left: 10px;">Đang xóa...</span>
-        </button>
-        <button type="button" id="gpt_export_excel" class="button primary" style="margin-left: 10px;">
-            Xuất Excel
-        </button>
-        <button id="export_table_excel" class="button">Xuất Excel kèm hình ảnh</button>
-        <button id="btn_export_pdf" class="button">Xuất PDF</button>
-        <div class="table-wrapper">
-            <table class="wp-list-table widefat fixed striped" id="gpt_macao_table">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="gpt_check_all"></th>
-                        <th>ID</th>
-                        <th>Mã cào</th>
-                        <th>Điểm</th>
-                        <th>Trạng thái</th>
-                        <th>Sản phẩm</th>
-                        <th>Ngày tạo</th>
-                        <th>Token phủ bạc</th>
-                        <th>Link QR</th>
-                        <th>Bar code</th>
-                    </tr>
-                </thead>
-                <tbody>
+    </div>
+    <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" style="margin-bottom: 15px;">
+        <input type="hidden" name="action" value="gpt_export_barcode_excel">
+        <button type="submit" class="button button-primary">📥 Xuất File Excel</button>
+    </form>
+    <div id="gpt-export-loading" style="display:none; margin-top:10px;">
+        <div class="spinner is-active" style="margin-bottom: 10px;"></div>
+        <strong>Đang xử lý và tạo file Excel, vui lòng chờ...</strong>
+    </div>
+    <button type="button" id="gpt_delete_selected" class="button alert">
+        Xóa các mã đã chọn
+        <span id="gpt_delete_loading" style="display:none;">Đang xóa...</span>
+    </button>
+    <div class="table-wrapper">
+        <table class="wp-list-table widefat fixed striped" id="gpt_barcode_table">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="gpt_check_all"></th>
+                    <!-- <th>ID</th> -->
+                    <th>Mã định danh</th>
+                    <th>Điểm</th>
+                    <th>Trạng thái</th>
+                    <th>Sản phẩm</th>
+                    <th>Ngày tạo</th>
+                    <th>Token phủ bạc</th>
+                    <th>Link QR</th>
+                    <th>Bar code</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (!empty($results)) : ?>
                     <?php foreach ($results as $row) : ?>
                     <tr>
                         <td><input type="checkbox" class="gpt_check_item" value="<?php echo $row->id; ?>"></td>
-                        <td><?php echo $row->id; ?></td>
                         <td><?php echo $row->barcode; ?></td>
                         <td><?php echo $row->point; ?></td>
                         <td>
@@ -288,11 +232,7 @@ function gpt_macao_list_page() {
                                 $products = get_posts($args);
 
                                 if (!empty($products)) {
-                                    $product = $products[0];
-                                    $product_name = $product->post_title;
-                                    $product_image = get_the_post_thumbnail_url($product->ID, 'medium');
-
-                                    echo $product_name;
+                                    echo $products[0]->post_title;
                                 } else {
                                     echo $custom_prod_id;
                                 }
@@ -300,199 +240,87 @@ function gpt_macao_list_page() {
                         </td>
                         <td><?php echo $row->created_at; ?></td>
                         <td><?php echo $row->token; ?></td>
-                        <td><?php echo '<img src="' . esc_url($row->qr_code_url) . '" alt="QR mã cào" style="height:100px;">'; ?></td>
-                        <td><?php echo '<img src="' . esc_url($row->barcode_url) . '" alt="Barcode mã cào" style="height:30px;">'; ?></td>
+                        <td><img src="<?php echo esc_url($row->qr_code_url); ?>" alt="QR mã cào" style="height:100px;"></td>
+                        <td><img src="<?php echo esc_url($row->barcode_url); ?>" alt="Barcode mã cào" style="height:80px;"></td>
                     </tr>
                     <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+                <?php else : ?>
+                    <tr>
+                        <td colspan="9" style="text-align:center; font-style: italic;">Không có dữ liệu phù hợp với bộ lọc.</td>
+                    </tr>
+                <?php endif; ?>
+            </tbody>
 
-            <?php
-            if ($total_pages > 1) {
-                echo '<div class="tablenav"><div class="tablenav-pages">';
-                echo paginate_links([
-                    'base' => admin_url('admin.php?page=gpt-danh-sach-ma-cao%_%'),
-                    'format' => '&paged=%#%',
-                    'current' => $paged,
-                    'total' => $total_pages
-                ]);
-                echo '</div></div>';
-            }
-            ?>
-        </div>
-        <div id="export_pdf_area">
-        <style>
-            .export-page {
-                page-break-after: always;
-                padding-bottom: 30px;
-            }
-            .export-page:last-child {
-                page-break-after: auto;
-            }
-
-            table.export-table {
-                width: 100%;
-                border-collapse: collapse;
-                font-family: Arial, sans-serif;
-                font-size: 13px;
-            }
-            table.export-table th, table.export-table td {
-                border: 1px solid #ccc;
-                padding: 6px 10px;
-                text-align: center;
-                vertical-align: middle;
-            }
-            table.export-table img {
-                height: 80px;
-                width: auto;
-                object-fit: contain;
-            }
-        </style>
-
-        <?php
-        $chunks = array_chunk($results, 9);
-        foreach ($chunks as $rows): ?>
-            <div class="export-page">
-                <table class="export-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Điểm</th>
-                            <th>Mã cào</th>
-                            <th>Token</th>
-                            <th>QR</th>
-                            <th>Barcode</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($rows as $row): ?>
-                        <tr>
-                            <td><?php echo $row->id; ?></td>
-                            <td><?php echo $row->point; ?></td>
-                            <td><?php echo $row->barcode; ?></td>
-                            <td><?php echo $row->token; ?></td>
-                            <td><img src="<?php echo esc_url($row->qr_code_url); ?>" /></td>
-                            <td><img src="<?php echo esc_url($row->barcode_url); ?>" /></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endforeach; ?>
+        </table>
     </div>
-
-    <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <?php
+        if ($total_pages > 1) {
+            echo '<div class="tablenav"><div class="tablenav-pages">';
+            echo paginate_links([
+                'base' => admin_url('admin.php?page=gpt-danh-sach-ma-cao%_%'),
+                'format' => '&paged=%#%',
+                'current' => $paged,
+                'total' => $total_pages
+            ]);
+            echo '</div></div>';
+        }
+    ?>
     <script>
-    document.getElementById("btn_export_pdf").addEventListener("click", function () {
-        const element = document.getElementById("export_pdf_area");
+        document.addEventListener('DOMContentLoaded', function () {
+            const form = document.getElementById('gpt-export-form');
+            const loading = document.getElementById('gpt-export-loading');
 
-        // Load tất cả ảnh trước khi xuất
-        const images = element.querySelectorAll("img");
-        const imagePromises = [];
-
-        images.forEach(img => {
-            if (!img.complete) {
-                imagePromises.push(new Promise(resolve => {
-                    img.onload = resolve;
-                    img.onerror = resolve;
-                }));
-            }
+            form.addEventListener('submit', function () {
+                loading.style.display = 'block';
+            });
         });
-
-        Promise.all(imagePromises).then(() => {
-            const opt = {
-                margin:       0.5,
-                filename:     'barcode_' + new Date().toISOString().slice(0,10) + '.pdf',
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-            };
-
-            html2pdf().set(opt).from(element).save();
-        });
-    });
     </script>
 
     <script>
-        document.getElementById('export_table_excel').addEventListener('click', function () {
-            let tableHTML = document.getElementById('gpt_macao_table').outerHTML;
-            let html = `
-                <html xmlns:o="urn:schemas-microsoft-com:office:office"
-                    xmlns:x="urn:schemas-microsoft-com:office:excel"
-                    xmlns="http://www.w3.org/TR/REC-html40">
-                <head>
-                    <meta charset="UTF-8">
-                </head>
-                <body>
-                    ${tableHTML}
-                </body>
-                </html>
-            `;
-
-            let blob = new Blob(['\ufeff' + html], {
-                type: 'application/vnd.ms-excel'
+        jQuery(document).ready(function($) {
+            $('#gpt_check_all').on('change', function() {
+                $('.gpt_check_item').prop('checked', $(this).is(':checked'));
             });
 
-            let link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'barcode_kem_anh_' + new Date().toISOString().slice(0,10) + '.xls';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        });
-        </script>
+            $('#gpt_delete_selected').on('click', function() {
+                let selected = [];
+                $('.gpt_check_item:checked').each(function() {
+                    selected.push($(this).val());
+                });
 
-
-
-
-    <script>
-    jQuery(document).ready(function($) {
-        $('#gpt_check_all').on('change', function() {
-            $('.gpt_check_item').prop('checked', $(this).is(':checked'));
-        });
-
-        $('#gpt_delete_selected').on('click', function() {
-            let selected = [];
-            $('.gpt_check_item:checked').each(function() {
-                selected.push($(this).val());
-            });
-
-            if (selected.length === 0) {
-                alert('Vui lòng chọn ít nhất 1 mã để xóa.');
-                return;
-            }
-
-            if (!confirm('Bạn có chắc chắn muốn xóa các mã đã chọn?')) {
-                return;
-            }
-
-            // Hiển thị loading
-            $('#gpt_delete_loading').show();
-            $('#gpt_delete_selected').prop('disabled', true);
-
-            $.post(ajaxurl, {
-                action: 'gpt_delete_macao',
-                ids: selected
-            }, function(response) {
-                $('#gpt_delete_loading').hide();
-                $('#gpt_delete_selected').prop('disabled', false);
-
-                if (response.status === 'success') {
-                    alert('Đã xóa thành công!');
-                    location.reload();
-                } else {
-                    alert('Lỗi: ' + response.message);
+                if (selected.length === 0) {
+                    alert('Vui lòng chọn ít nhất 1 mã để xóa.');
+                    return;
                 }
-            }).fail(function() {
-                $('#gpt_delete_loading').hide();
-                $('#gpt_delete_selected').prop('disabled', false);
 
-                alert('Lỗi kết nối server.');
+                if (!confirm('Bạn có chắc chắn muốn xóa các mã đã chọn?')) {
+                    return;
+                }
+
+                $('#gpt_delete_loading').show();
+                $('#gpt_delete_selected').prop('disabled', true);
+
+                $.post(ajaxurl, {
+                    action: 'gpt_delete_barcode',
+                    ids: selected
+                }, function(response) {
+                    $('#gpt_delete_loading').hide();
+                    $('#gpt_delete_selected').prop('disabled', false);
+
+                    if (response.status === 'success') {
+                        alert('Đã xóa thành công!');
+                        location.reload();
+                    } else {
+                        alert('Lỗi: ' + response.message);
+                    }
+                }).fail(function() {
+                    $('#gpt_delete_loading').hide();
+                    $('#gpt_delete_selected').prop('disabled', false);
+
+                    alert('Lỗi kết nối server.');
+                });
             });
         });
-    });
     </script>
 <?php
 }

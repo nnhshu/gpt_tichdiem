@@ -3,25 +3,69 @@
 function register_order_check_post_type() {
     register_post_type('order_check', array(
         'labels' => array(
-            'name' => 'Order Checks',
-            'singular_name' => 'Order Check',
-            'add_new' => 'Thêm Order Check',
-            'add_new_item' => 'Thêm mới Order Check',
-            'edit_item' => 'Chỉnh sửa Order Check',
-            'new_item' => 'Order Check mới',
-            'view_item' => 'Xem Order Check',
-            'search_items' => 'Tìm Order Check',
+            'name' => 'Truy xuất đơn hàng',
+            'singular_name' => 'Truy xuất đơn hàng',
+            'add_new' => 'Thêm đơn hàng truy xuất mới',
+            'add_new_item' => 'Thêm mới đơn hàng',
+            'edit_item' => 'Chỉnh sửa đơn hàng',
+            'new_item' => 'Thêm đơn hàng mới',
+            'view_item' => 'Xem mã định danh trong đơn hàng',
+            'search_items' => 'Tìm đơn hàng truy xuất',
             'not_found' => 'Không tìm thấy',
             'not_found_in_trash' => 'Không có trong thùng rác'
         ),
         'public' => true,
-        'menu_icon' => 'dashicons-clipboard',
-        'show_in_menu' => 'gpt-macao',
+        'show_ui' => true,
+        'show_in_menu' => true,
         'supports' => array('title'),
         'has_archive' => true,
     ));
 }
 add_action('init', 'register_order_check_post_type');
+
+function gpt_render_ordercheck_tab() {
+    $args = array(
+        'post_type'      => 'order_check',
+        'posts_per_page' => 20,
+        'post_status'    => 'publish',
+        'orderby'        => 'date',
+        'order'          => 'DESC',
+    );
+
+    $query = new WP_Query($args);
+
+    echo '<div class="wrap">';
+    echo '<h2>📦 Danh sách Order Check</h2>';
+    echo '<p><a href="' . admin_url('post-new.php?post_type=order_check') . '" class="button button-primary">+ Thêm Order Check mới</a></p>';
+
+    if ($query->have_posts()) {
+        echo '<table class="widefat fixed striped">';
+        echo '<thead><tr>
+                <th>Tiêu đề</th>
+                <th>Ngày tạo</th>
+                <th>Người tạo</th>
+                <th>Thao tác</th>
+              </tr></thead>';
+        echo '<tbody>';
+        while ($query->have_posts()) {
+            $query->the_post();
+            echo '<tr>';
+            echo '<td><strong><a href="' . get_edit_post_link(get_the_ID()) . '">' . get_the_title() . '</a></strong></td>';
+            echo '<td>' . get_the_date() . '</td>';
+            echo '<td>' . get_the_author() . '</td>';
+            echo '<td><a href="' . get_edit_post_link(get_the_ID()) . '" class="button small">Sửa</a></td>';
+            echo '</tr>';
+        }
+        echo '</tbody>';
+        echo '</table>';
+    } else {
+        echo '<p>📭 Không có Order Check nào.</p>';
+    }
+
+    wp_reset_postdata();
+    echo '</div>';
+}
+
 
 function add_order_check_metaboxes() {
     add_meta_box('order_check_fields', 'Thông tin Order Check', 'render_order_check_fields', 'order_check', 'normal', 'default');
@@ -32,9 +76,25 @@ function render_order_check_fields($post) {
     $order_id = get_post_meta($post->ID, 'order_id', true);
     $order_images = get_post_meta($post->ID, 'order_images', true);
     $macao_ids = get_post_meta($post->ID, 'macao_ids', true);
-    $order_batch = get_post_meta($post->ID, 'order_batch', true);
     $order_date = get_post_meta($post->ID, 'order_date', true);
     $order_export_by = get_post_meta($post->ID, 'order_export_by', true);
+    $channel = get_post_meta($post->ID, 'order_check_channel', true);
+    $province = get_post_meta($post->ID, 'order_check_province', true);
+
+    global $wpdb;
+    $table = BIZGPT_PLUGIN_WP_CHANNELS;
+    $channel_rows = $wpdb->get_results("SELECT channel_code, title FROM $table ORDER BY id DESC");
+    $provinces = [
+        'An Giang' => 'AG', 'Bắc Ninh' => 'BN', 'Cà Mau' => 'CM', 'Cao Bằng' => 'CB',
+        'Đắk Lắk' => 'DL', 'Điện Biên' => 'DB', 'Đồng Nai' => 'DG', 'Đồng Tháp' => 'DT',
+        'Gia Lai' => 'GL', 'Hà Tĩnh' => 'HT', 'Hưng Yên' => 'HY', 'Khánh Hoà' => 'KH',
+        'Lai Châu' => 'LC', 'Lâm Đồng' => 'LD', 'Lạng Sơn' => 'LS', 'Lào Cai' => 'LA',
+        'Nghệ An' => 'NA', 'Ninh Bình' => 'NB', 'Phú Thọ' => 'PT', 'Quảng Ngãi' => 'QG',
+        'Quảng Ninh' => 'QN', 'Quảng Trị' => 'QT', 'Sơn La' => 'SL', 'Tây Ninh' => 'TN',
+        'Thái Nguyên' => 'TG', 'Thanh Hóa' => 'TH', 'TP. Cần Thơ' => 'CT', 'TP. Đà Nẵng' => 'DN',
+        'TP. Hà Nội' => 'HN', 'TP. Hải Phòng' => 'HP', 'TP. Hồ Chí Minh' => 'SG', 'TP. Huế' => 'HUE',
+        'Tuyên Quang' => 'TQ', 'Vĩnh Long' => 'VL'
+    ];
 
     wp_nonce_field('save_order_check_fields', 'order_check_nonce');
 
@@ -43,26 +103,54 @@ function render_order_check_fields($post) {
         $order_date = current_time('mysql');
     }
     ?>
-    <p>
-        <label for="order_id">ID Đơn hàng:</label><br>
+    <style>
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            margin-bottom: 8px;
+            display: block;
+        }
+    </style>
+    <div class="form-group">
+        <label for="order_id">ID Đơn hàng:</label>
         <input type="text" name="order_id" id="order_id" value="<?php echo esc_attr($order_id); ?>" style="width:100%;">
-    </p>
-    <p>
-        <label for="order_batch">Lô date:</label><br>
-        <input type="text" name="order_batch" id="order_batch" value="<?php echo esc_attr($order_batch); ?>" style="width:100%;">
-    </p>
-    <p>
-        <label for="order_date">Ngày giờ xuất:</label><br>
+    </div>
+    <div class="form-group">
+        <label for="order_check_province">Tỉnh thành:</label>
+        <select name="order_check_province" style="width:100%;">
+            <?php foreach ($provinces as $value => $label): ?>
+                <option value="<?php echo esc_attr($label); ?>" <?php selected($province, $label); ?>>
+                    <?php echo esc_html($value); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="order_check_channel">Kênh:</label>
+        <select name="order_check_channel" style="width:100%;">
+            <option value="">-- Chọn kênh --</option>
+            <?php foreach ($channel_rows as $row): ?>
+                <option value="<?php echo esc_attr($row->channel_code); ?>" <?php selected($channel, $row->channel_code); ?>>
+                    <?php echo esc_html($row->title); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    
+    <div class="form-group">
+        <label for="order_date">Ngày giờ xuất:</label>
         <input type="datetime-local" name="order_date" id="order_date"
             value="<?php echo esc_attr(date('Y-m-d\TH:i', strtotime($order_date))); ?>"
             style="width:100%;">
-    </p>
-    <p>
-        <label for="order_export_by">Người xuất kho:</label><br>
+    </div>
+    <div class="form-group">
+        <label for="order_export_by">Người xuất kho:</label>
         <input type="text" name="order_export_by" id="order_export_by" value="<?php echo esc_attr($order_export_by); ?>" style="width:100%;">
-    </p>
-    <p>
-        <label for="order_images">Ảnh đơn hàng (có thể chọn nhiều):</label><br>
+    </div>
+    <div class="form-group">
+        <label for="order_images">Ảnh đơn hàng (có thể chọn nhiều):</label>
         <input type="hidden" name="order_images" id="order_images" value="<?php echo esc_attr($order_images); ?>">
         <button type="button" class="button upload_gallery_button">Chọn ảnh</button>
         <div id="order_images_preview" style="margin-top:10px;">
@@ -131,16 +219,19 @@ function save_order_check_fields($post_id) {
 
     global $wpdb;
     $order_table   = BIZGPT_PLUGIN_WP_ORDER_PRODUCTS;
-    $macao_table   = BIZGPT_PLUGIN_WP_BARCODE;
+    $barcode_table   = BIZGPT_PLUGIN_WP_BARCODE;
     $sellout_table = BIZGPT_PLUGIN_WP_ORDER_PRODUCTS_SELL_OUT;
 
     // Meta fields
     update_post_meta_if_changed($post_id, 'order_id', sanitize_text_field($_POST['order_id']));
     update_post_meta_if_changed($post_id, 'order_images', sanitize_text_field($_POST['order_images']));
-    update_post_meta_if_changed($post_id, 'order_batch', sanitize_text_field($_POST['order_batch']));
     update_post_meta_if_changed($post_id, 'order_date', sanitize_text_field($_POST['order_date']));
     update_post_meta_if_changed($post_id, 'order_export_by', sanitize_text_field($_POST['order_export_by']));
-
+    update_post_meta_if_changed($post_id, 'order_check_channel', sanitize_text_field($_POST['order_check_channel']));
+    update_post_meta_if_changed($post_id, 'order_check_province', sanitize_text_field($_POST['order_check_province']));
+    // Lấy ra tỉnh & kênh
+    $province = sanitize_text_field($_POST['order_check_province']);
+    $channel = sanitize_text_field($_POST['order_check_channel']);
     // Trạng thái đơn + log
     if (isset($_POST['order_status'])) {
         $new_status = sanitize_text_field($_POST['order_status']);
@@ -169,8 +260,9 @@ function save_order_check_fields($post_id) {
             $product_id = intval($item['product_id']);
             $qty = intval($item['quantity']);
             $barcode = sanitize_textarea_field($item['barcode']);
-            $province = sanitize_text_field($item['province']);
-            $channel = sanitize_text_field($item['channel']);
+            $lot = sanitize_text_field($item['lot']);
+            error_log("lô date: $lot");
+
             if (!$product_id || $qty <= 0) continue;
 
             $product = wc_get_product($product_id);
@@ -202,7 +294,18 @@ function save_order_check_fields($post_id) {
             foreach ($macaos as $m) {
                 $m = trim($m);
                 if ($m) {
-                    $wpdb->update($macao_table, ['order_by_product_id' => $post_id], ['barcode' => $m]);
+                    if ($m) {
+                    $wpdb->update(
+                        $barcode_table, 
+                        [
+                            'order_by_product_id' => $post_id,
+                            'channel' => $channel,
+                            'province' => $province,
+                            'lot' => $lot
+                        ], 
+                        ['barcode' => $m]
+                    );
+                }
                 }
             }
         }
@@ -222,7 +325,7 @@ function save_order_check_fields($post_id) {
         $channel  = sanitize_text_field($item['channel']);
 
         $used_codes = $wpdb->get_col($wpdb->prepare(
-            "SELECT barcode FROM $macao_table WHERE order_by_product_id = %d AND product_id = %s AND status = 'used'",
+            "SELECT barcode FROM $barcode_table WHERE order_by_product_id = %d AND product_id = %s AND status = 'used'",
             $post_id, $custom_prod_id
         ));
 
@@ -313,16 +416,17 @@ function render_order_check_products_box($post) {
     $all_products = wc_get_products(['limit' => -1]);
 
     echo '<table class="widefat" id="order_check_products_table" style="margin-bottom:10px;">';
-    echo '<thead><tr><th>Sản phẩm</th><th>Số lượng</th><th>Mã cào</th><th>Tỉnh thành</th><th>Kênh</th></tr></thead><tbody>';
+    echo '<thead><tr><th>Sản phẩm</th><th>Số lượng</th><th>Mã định danh</th><th>Lô date</th><th></th></tr></thead><tbody>';
 
     if (!empty($products)) {
         foreach ($products as $index => $item) {
             $product_id = isset($item['product_id']) ? $item['product_id'] : '';
             $quantity   = isset($item['quantity']) ? $item['quantity'] : '';
             $barcode     = isset($item['barcode']) ? $item['barcode'] : '';
-            $province   = isset($item['province']) ? $item['province'] : '';
-            $channel    = isset($item['channel']) ? $item['channel'] : '';
-            echo render_product_row($all_products, $product_id, $quantity, $barcode, $province, $channel, $index);
+            // $province   = isset($item['province']) ? $item['province'] : '';
+            // $channel    = isset($item['channel']) ? $item['channel'] : '';
+            $lot    = isset($item['lot']) ? $item['lot'] : '';
+            echo render_product_row($all_products, $product_id, $quantity, $barcode, $lot, $index);
         }
     }
 
@@ -398,7 +502,7 @@ function render_order_used_codes_box($post) {
             echo '<td>' . esc_html($product_name) . '</td>';
             echo '<td>' . intval($used_count) . '</td>';
             echo '<td><pre style="white-space:pre-wrap;max-height:120px;overflow-y:auto;background:#f9f9f9;padding:8px;border:1px solid #ddd;">' . 
-                esc_html(implode("\n", $used_codes)) . '</pre></td>';
+            esc_html(implode("\n", $used_codes)) . '</pre></td>';
             echo '<td>' . esc_html($item['province']) . '</td>';
             echo '<td>' . esc_html($item['channel']) . '</td>';
             echo '</tr>';
@@ -410,29 +514,7 @@ function render_order_used_codes_box($post) {
     <?php
 }
 
-
-function render_product_row($all_products, $product_id = '', $quantity = '', $barcode = '', $province = '', $channel = '', $index = '__index__') {
-    global $wpdb;
-    $table = BIZGPT_PLUGIN_WP_CHANNELS;
-    $channel_rows = $wpdb->get_results("SELECT channel_code, title FROM $table ORDER BY id DESC");
-    $provinces = [
-        'An Giang' => 'AG', 'Bắc Ninh' => 'BN', 'Cà Mau' => 'CM', 'Cao Bằng' => 'CB',
-        'Đắk Lắk' => 'DL', 'Điện Biên' => 'DB', 'Đồng Nai' => 'DG', 'Đồng Tháp' => 'DT',
-        'Gia Lai' => 'GL', 'Hà Tĩnh' => 'HT', 'Hưng Yên' => 'HY', 'Khánh Hoà' => 'KH',
-        'Lai Châu' => 'LC', 'Lâm Đồng' => 'LD', 'Lạng Sơn' => 'LS', 'Lào Cai' => 'LA',
-        'Nghệ An' => 'NA', 'Ninh Bình' => 'NB', 'Phú Thọ' => 'PT', 'Quảng Ngãi' => 'QG',
-        'Quảng Ninh' => 'QN', 'Quảng Trị' => 'QT', 'Sơn La' => 'SL', 'Tây Ninh' => 'TN',
-        'Thái Nguyên' => 'TG', 'Thanh Hóa' => 'TH', 'TP. Cần Thơ' => 'CT', 'TP. Đà Nẵng' => 'DN',
-        'TP. Hà Nội' => 'HN', 'TP. Hải Phòng' => 'HP', 'TP. Hồ Chí Minh' => 'SG', 'TP. Huế' => 'HUE',
-        'Tuyên Quang' => 'TQ', 'Vĩnh Long' => 'VL'
-    ];
-
-    // $channels = [
-    //     '' => 'Chọn kênh',
-    //     'GT' => 'General Trade',
-    //     'MT' => 'Modern Trade',
-    //     'OL' => 'Online',
-    // ];
+function render_product_row($all_products, $product_id = '', $quantity = '', $barcode = '', $lot = '', $index = '__index__') {
     ob_start();
     ?>
     <tr>
@@ -467,30 +549,19 @@ function render_product_row($all_products, $product_id = '', $quantity = '', $ba
                 data-index="<?php echo esc_attr($index); ?>"
                 rows="3"
                 style="width: 100%;"
-                placeholder="Nhập hoặc scan mã cào, mỗi dòng 1 mã"
+                placeholder="Nhập hoặc scan mã định danh, mỗi dòng 1 mã"
             ><?php echo esc_textarea($barcode); ?></textarea>
-            <small class="barcode-count" data-index="<?php echo esc_attr($index); ?>">Số lượng mã: 0</small>
+            <small class="barcode-count" data-index="<?php echo esc_attr($index); ?>">Số lượng mã đã nhập: 0</small>
         </td>
         <td>
-            <select name="order_check_products[<?php echo $index; ?>][province]">
-                <?php foreach ($provinces as $value => $label): ?>
-                    <option value="<?php echo esc_attr($label); ?>" <?php selected($province, $label); ?>>
-                        <?php echo esc_html($value); ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
+            <input type="text" 
+                name="order_check_products[<?php echo $index; ?>][lot]" 
+                value="<?php echo esc_attr($lot); ?>" 
+                placeholder="Nhập lô date" 
+                style="width: 100%;"
+            />
         </td>
-        <td>
-            <select name="order_check_products[<?php echo $index; ?>][channel]">
-                <option value="">-- Chọn kênh --</option>
-                <?php foreach ($channel_rows as $row): ?>
-                    <option value="<?php echo esc_attr($row->channel_code); ?>" <?php selected($channel, $row->channel_code); ?>>
-                        <?php echo esc_html($row->title); ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </td>
-        <td><button type="button" class="button remove-row">X</button></td>
+        <td><button type="button" class="button remove-row">✕</button></td>
     </tr>
     <?php
     return ob_get_clean();

@@ -65,7 +65,6 @@ function enhanced_bizgpt_insert_point_log($data = array()) {
     global $wpdb;
 
     $logs_table = BIZGPT_PLUGIN_WP_LOGS;
-
     $log_result = $wpdb->insert($logs_table, array(
         'user_id' => isset($data['user_id']) ? intval($data['user_id']) : 0,
         'client_id' => sanitize_text_field($data['client_id']),
@@ -83,16 +82,16 @@ function enhanced_bizgpt_insert_point_log($data = array()) {
         'ward' => sanitize_text_field($data['ward']),
         'transaction_type' => sanitize_text_field($data['transaction_type']),
         'product_name' => sanitize_text_field($data['product_name']),
-        // Thêm các trường affiliate nếu có
         'phone_referrer' => isset($data['phone_referrer']) ? sanitize_text_field($data['phone_referrer']) : '',
         'referrer_name' => isset($data['referrer_name']) ? sanitize_text_field($data['referrer_name']) : '',
         'aff_by_store_id' => isset($data['aff_by_store_id']) ? sanitize_text_field($data['aff_by_store_id']) : '',
         'aff_by_employee_code' => isset($data['aff_by_employee_code']) ? sanitize_text_field($data['aff_by_employee_code']) : '',
         'is_affiliate_reward' => isset($data['is_affiliate_reward']) ? intval($data['is_affiliate_reward']) : 0,
         'user_province_from_ip' => isset($data['user_province_from_ip']) ? intval($data['user_province_from_ip']) : '',
+        'u_status' => sanitize_text_field($data['u_status']) ? sanitize_text_field($data['u_status']) : '',
+        'note_status' => sanitize_text_field($data['note_status']) ? sanitize_text_field($data['note_status']) : '',
         'created_at' => current_time('mysql')
     ));
-
     if ($log_result) {
         // Cập nhật bảng user points
         $phone_number = $data['phone_number'];
@@ -226,6 +225,38 @@ function gpt_form_accumulate_code() {
                 <?php echo $notice; ?>
             </div>
         </div>
+        <div class="div-chuyen-huong-mes">
+            <div class="stars"></div>
+            <div class="shooting-star"></div>
+            <div class="glow"></div>
+            <div class="content">
+                <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/Bimbosan_Logo_no-Claim-1024x267.png"
+                    class="logo" alt="Logo Bimbosan" />
+
+                <div class="message" id="messageDb">
+                    ✨ Bạn đang ở bước cuối cùng!<br><br>
+                    Nhấn để bắt đầu tích điểm và nhận ưu đãi đổi quà 🎁
+                </div>
+                <button class="btn" onclick="goToMessenger()" id="giftBtn">
+                    <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/logo-messenger.png"
+                        alt="Messenger" />
+                    Nhấn để tích điểm
+                </button>
+                <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/06/67b49d34db548cf82c4c01e5_cows.png"
+                    alt="Cow surprise" class="cow-image" />
+            </div>
+            <div class="div-chat" onclick="goToMessenger()">
+                <p class="shop">Hệ thống:</p>
+                <p class="shop">📌 Điểm thưởng sẽ được cộng khi bạn bắt đầu trò chuyện.</p>
+                <p class="user">Ủa tích điểm đổi gì vậy?</p>
+                <p class="shop">🎁 Nhiều phần quà bất ngờ – khám phá trong chat nha!</p>
+            </div>
+        </div>
+        <script>
+            function goToMessenger() {
+                window.location.href = `https://m.me/700792956451509?ref=.f.2dfe2f2acdbb4fa281d6c5bd018478f0`;
+            }
+        </script>
         <?php
         return ob_get_clean();
     ?>
@@ -253,7 +284,13 @@ function gpt_form_accumulate_code() {
         if(isset($_GET['code']) && isset($_GET['token'])){
             global $wpdb;
             $table_name = BIZGPT_PLUGIN_WP_LOGS;
-            $macao_table = BIZGPT_PLUGIN_WP_BARCODE;
+            $barcode_table = BIZGPT_PLUGIN_WP_BARCODE;
+            $affiliate_log_table = BIZGPT_PLUGIN_WP_AFFILIATE_LOGS;
+            $store_table = BIZGPT_PLUGIN_WP_STORE_LIST;
+            $employees_table = BIZGPT_PLUGIN_WP_EMPLOYEES;
+
+            $note_status = "";
+
             // Lấy dữ liệu từ form
             $code = isset($_GET['code']) ? sanitize_text_field($_GET['code']) : '';
             $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
@@ -281,18 +318,32 @@ function gpt_form_accumulate_code() {
             $referrer_phone = "";
             $referrer_name = "";
             $aff_by_store_id = "";
-            $aff_by_employee_code = "";
+            // $aff_by_employee_code = "";
+            $store_name_aff = "";
+            // $employee_name_aff = "";
+
             if($aff_check_type == "affiliate"){
                 $referrer_phone = isset($_GET['referrer_phone']) ? sanitize_text_field($_GET['referrer_phone']) : '';
                 $referrer_name = isset($_GET['referrer_name']) ? sanitize_text_field($_GET['referrer_name']) : '';
             } else if($aff_check_type == "employee"){
                 $aff_by_store_id = isset($_GET['store_id']) ? sanitize_text_field($_GET['store_id']) : '';
-                $aff_by_employee_code = isset($_GET['employee_id']) ? sanitize_text_field($_GET['employee_id']) : '';
+                $store_name_aff = isset($_GET['store_name_aff']) ? sanitize_text_field($_GET['store_name_aff']) : '';
+                // $aff_by_employee_code = isset($_GET['employee_id']) ? sanitize_text_field($_GET['employee_id']) : '';
+                // $employee_name_aff = isset($_GET['employee_name']) ? sanitize_text_field($_GET['employee_name']) : '';
             }
-            $used_by_other_phone = $wpdb->get_var("SELECT phone_number FROM $table_name WHERE barcode = '$code'");
-            // $code_info = $wpdb->get_row($wpdb->prepare("SELECT * FROM $macao_table WHERE LOWER(barcode) = LOWER(%s)",$code));
+            // $used_by_other_phone = $wpdb->get_var("SELECT phone_number FROM $table_name WHERE barcode = '$code'");
+            $check_used_in_logs = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $table_name WHERE barcode = %s",
+                $code
+            ));
+
+            $check_used_in_barcode = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $barcode_table WHERE barcode = %s AND status = 'used'",
+                $code
+            ));
+            // $code_info = $wpdb->get_row($wpdb->prepare("SELECT * FROM $barcode_table WHERE LOWER(barcode) = LOWER(%s)",$code));
             $code_info = $wpdb->get_row($wpdb->prepare("
-                SELECT * FROM $macao_table 
+                SELECT * FROM $barcode_table 
                 WHERE LOWER(barcode) = LOWER(%s) AND token = %s
             ", $code, $token));
 
@@ -329,7 +380,7 @@ function gpt_form_accumulate_code() {
                 }
             }
 
-            if ($used_by_other_phone) {
+            if ($check_used_in_logs > 0 || $check_used_in_barcode > 0) {
                 $response = 'Mã '.$code.' đã được sử dụng. Vui lòng thử lại mã khác. Chúng tôi có thể giúp được gì cho bạn không?';
                 $json_content = '
                     "messages": [
@@ -417,25 +468,76 @@ function gpt_form_accumulate_code() {
                     
                     $session = intval($code_info->session);
                     $status = 'used';
-
+                    
                     $is_first_time = $wpdb->get_var(
                         $wpdb->prepare(
                             "SELECT COUNT(*) FROM $table_name WHERE phone_number = %s AND transaction_type = 'tich_diem'",
                             $phone_number
                         )
-                    ) == 0;
+                    ) > 0 ? false : true;;
 
                     $original_points = intval($code_info->point);
                     $bonus_points = 0;
 
-                    if ($is_first_time && $affiliate_enabled && !empty($referrer_phone)) {
+                    // if ($is_first_time && $affiliate_enabled && !empty($referrer_phone)) {
+                    //     $bonus_percent = floatval(get_option('affiliate_percent_per_new_user', 0));
+                    //     if ($bonus_percent > 0) {
+                    //         $bonus_points = round($original_points * ($bonus_percent / 100));
+                    //     }
+                    // }
+                    if ($is_first_time) {
                         $bonus_percent = floatval(get_option('affiliate_percent_per_new_user', 0));
+
                         if ($bonus_percent > 0) {
-                            $bonus_points = round($original_points * ($bonus_percent / 100));
+                            $bonus_points = $original_points * ($bonus_percent / 100);
+                        }
+
+                        if (!empty($referrer_phone)) {
+                            $note_status = "Bạn được giới thiệu bởi $referrer_phone và nhận thưởng affiliate!";
+                            $user_status = 'aff_new';
+                            // Ghi log & cập nhật stats
+                            gpt_log_affiliate_reward(
+                                'referral',
+                                $referrer_phone,
+                                $phone_number,
+                                $bonus_points,
+                                '',
+                                $note_status
+                            );
+
+                        } 
+                        // elseif (!empty($aff_by_employee_code) && !empty($aff_by_store_id)) {
+                        //     $store = $wpdb->get_results($wpdb->prepare(
+                        //         "SELECT id, store_name as name FROM $store_table WHERE id = %d",
+                        //         $aff_by_store_id
+                        //     ));
+                        //     $note_status = "Nhân viên $employee_name_aff - #$aff_by_employee_code tại cửa hàng $store_name_aff - #$aff_by_store_id đã giới thiệu người mới!";
+                            
+                        //     gpt_log_affiliate_reward(
+                        //         'employee',
+                        //         $aff_by_employee_code,
+                        //         $phone_number,
+                        //         $bonus_points,
+                        //         $aff_by_store_id,
+                        //         $note_status
+                        //     );
+
+                        // } 
+                        elseif (!empty($aff_by_store_id)) {
+                            $note_status = "🎉 Người dùng được giới thiệu bởi cửa hàng $store_name_aff - $aff_by_store_id!";
+                            $user_status = 'new';
+                            gpt_log_affiliate_reward(
+                                'store_only',
+                                '',
+                                $phone_number,
+                                $bonus_points,
+                                $aff_by_store_id,
+                                $note_status
+                            );
                         }
                     }
-                    $points = $original_points + $bonus_points;
 
+                    $points = $original_points + $bonus_points;
                     $main_transaction_data = array(
                         'user_id' => 0,
                         'client_id' => $clientID,
@@ -445,12 +547,12 @@ function gpt_form_accumulate_code() {
                         'customer_name' => $username,
                         'phone_number' => $phone_number,
                         'point_change' => $points,
-                        'product' => $product_name,
-                        'store' => $store_name,
+                        'product' => $custom_prod_id,
+                        'store' => !empty($store_name) ? $store_name : NULL,
                         'point_location' => $user_current_location,
                         'address' => $address,
-                        'province' => $user_current_province,
-                        'ward' => $user_current_ward,
+                        'province' => !empty($user_current_province) ? $user_current_province : NULL,
+                        'ward' => !empty($user_current_ward) ? $user_current_ward : NULL,
                         'transaction_type' => 'tich_diem',
                         'product_name' => $product_name,
                         'user_district' => $user_district,
@@ -459,21 +561,23 @@ function gpt_form_accumulate_code() {
                         'user_postcode' => $user_postcode,
                         'user_full_address' => $user_full_address,
                         'user_detail_address' => $user_detail_address,
-                        'phone_referrer' => $referrer_phone,
-                        'referrer_name' => $referrer_name,
+                        'phone_referrer' => !empty($referrer_phone) ? $referrer_phone : NULL,
+                        'referrer_name' => !empty($referrer_name) ? $referrer_name : NULL,
                         'is_affiliate_reward' => 0,
+                        'u_status' => !empty($user_status) ? $user_status : NULL,
                         'note_status' => $bonus_points > 0 ? " (+$bonus_points điểm thưởng ref)" : "",
-                        'aff_by_store_id' => $aff_by_store_id,
-                        'aff_by_employee_code' => $aff_by_employee_code,
+                        'aff_by_store_id' => !empty($aff_by_store_id) ? $aff_by_store_id : NULL,
+                        'aff_by_employee_code' => "",
                         'user_province_from_ip' => $userProvinceFromIP
                     );
 
                     // Lưu giao dịch chính (sẽ tự động cập nhật user points)
                     $main_result = enhanced_bizgpt_insert_point_log($main_transaction_data);
+                    error_log("Error saving transaction data: " . print_r($main_transaction_data, true));
                     if ($main_result) {
                         // Cập nhật trạng thái mã cào
                         $wpdb->update(
-                            $macao_table,
+                            $barcode_table,
                             array('status' => 'used'),
                             array('barcode' => $code),
                             array('%s'),
@@ -513,29 +617,31 @@ function gpt_form_accumulate_code() {
                 <input type="hidden" id="user_current_location" name="user_current_location" value="">
                 <input type="hidden" id="userProvinceFromI" name="userProvinceFromI" value="">
                 <input type="hidden" name="aff_check_type" id="aff_check_type" value="">
+                <input type="hidden" name="store_name_aff" id="store_name_aff">
+                <!-- <input type="hidden" name="employee_name" id="employee_name"> -->
                 <div class="form-group">
                     <input 
                         type="text" 
                         id="code" 
                         name="code" 
                         value="<?php echo esc_attr($barcode); ?>" 
-                        placeholder="MÃ CÀO TRÊN QR CODE" 
+                        placeholder="Mã định danh sản phẩm" 
                         <?php echo $is_locked ? 'readonly style="background:#f9f9f9; color:#555;"' : ''; ?>
                         required
                     >    
                 </div>
                 <div id="product_info"></div>
                 <div class="form-group">
-                    <input type="text" id="token" name="token" value="<?php echo isset($_GET['token']) ? sanitize_text_field($_GET['token']) : ''; ?>" placeholder="TOKEN LỚP TRÁNG BẠC TRÊN THẺ" required>
+                    <input type="text" id="token" name="token" value="<?php echo isset($_GET['token']) ? sanitize_text_field($_GET['token']) : ''; ?>" placeholder="Token lớp tráng bạc trên tem" required>
                 </div>
                 <div class="form-group">
-                    <input type="text" id="username" name="username" value="<?php echo isset($_GET['username']) ? sanitize_text_field($_GET['username']) : ''; ?>" placeholder="HỌ VÀ TÊN" required>
+                    <input type="text" id="username" name="username" value="<?php echo isset($_GET['username']) ? sanitize_text_field($_GET['username']) : ''; ?>" placeholder="Họ và tên" required>
                 </div>
                 <div class="form-group">
-                    <input type="text" id="phone_number" name="phone_number" value="<?php echo isset($_GET['phone_number']) ? sanitize_text_field($_GET['phone_number']) : ''; ?>" placeholder="SỐ ĐIỆN THOẠI CỦA BẠN" required>
+                    <input type="text" id="phone_number" name="phone_number" value="<?php echo isset($_GET['phone_number']) ? sanitize_text_field($_GET['phone_number']) : ''; ?>" placeholder="Số điện thoại của bạn" required>
                 </div>
                 <div class="form-group">
-                    <input type="text" id="address" name="address" value="<?php echo isset($_GET['address']) ? sanitize_text_field($_GET['address']) : ''; ?>" placeholder="ĐỊA CHỈ CỦA BẠN" required>
+                    <input type="text" id="address" name="address" value="<?php echo isset($_GET['address']) ? sanitize_text_field($_GET['address']) : ''; ?>" placeholder="Địa chỉ của bạn" required>
                 </div>
                 <hr>
                 <div class="gpt-toggle-wrapper">
@@ -548,12 +654,12 @@ function gpt_form_accumulate_code() {
                 <div class="employee-fields" style="display:none; margin-top: 15px;">
                     <div class="form-group">
                         <label>Cửa hàng</label>
-                        <select name="store_id" id="store_id" style="width: 100%;" required></select>
+                        <select name="store_id" id="store_id" style="width: 100%;"></select>
                     </div>
-                    <div class="form-group">
+                    <!-- <div class="form-group">
                         <label>Nhân viên</label>
-                        <select name="employee_id" id="employee_id" style="width: 100%;" required></select>
-                    </div>
+                        <select name="employee_id" id="employee_id" style="width: 100%;"></select>
+                    </div> -->
                 </div>
                 <?php if ($affiliate_enabled): ?>
                     <div class="gpt-toggle-wrapper">
@@ -594,14 +700,15 @@ function gpt_form_accumulate_code() {
                 <?php endif; ?>
                 <hr>
                 <div class="form-group btn-group">
-                    <button type="submit" id="btn_tichdiem">TÍCH ĐIỂM NGAY</button>
+                    <button type="submit" class="btn-gradient" id="btn_tichdiem">TÍCH ĐIỂM NGAY</button>
                 </div>
                 <?php if($response) : ?>
                     <div class="error-message">
                         <span><?php echo $response; ?></span>
                     </div>
                 <?php endif; ?>
-                <?php if($response_success) : ?>
+                <?php if($response_message) : ?>
+                    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
                     <script>
                         const data = `<?php echo $response_message; ?>`;
                         Swal.fire({
@@ -667,6 +774,7 @@ function gpt_form_accumulate_code() {
                             console.log(res)
                             if (res.success) {
                                 let stores = res.data;
+                                console.log(stores)
                                 $('#store_id').html('');
                                 $.each(stores, function(i, store) {
                                     $('#store_id').append(`<option value="${store.id}">${store.name}</option>`);
@@ -679,21 +787,33 @@ function gpt_form_accumulate_code() {
 
                 $('#store_id').on('change', function() {
                     let store_id = $(this).val();
-                    if (store_id) {
-                        $.post(ajaxurl, {
-                            action: 'gpt_get_employees_by_store',
-                            store_id: store_id
-                        }, function(res) {
-                            if (res.success) {
-                                $('#employee_id').html('');
-                                $.each(res.data, function(i, emp) {
-                                    $('#employee_id').append(`<option value="${emp.code}">${emp.name} - #${emp.code}</option>`);
-                                });
-                                $('#employee_id').trigger('change');
-                            }
-                        });
-                    }
+                    let store_name = $('#store_id option:selected').text();
+                    $('#store_name_aff').val(store_name);
+                    // if (store_id) {
+                    //     $.post(ajaxurl, {
+                    //         action: 'gpt_get_employees_by_store',
+                    //         store_id: store_id
+                    //     }, function(res) {
+                    //         if (res.success) {
+                    //             $('#employee_id').html('');
+                    //             $.each(res.data, function(i, emp) {
+                    //                 $('#employee_id').append(`<option value="${emp.code}">${emp.name} - #${emp.code}</option>`);
+                    //             });
+                    //             $('#employee_id').trigger('change');
+                    //         }
+                    //     });
+                    // }
                 });
+
+                // $('#employee_id').on('change', function() {
+                //     let employee_id = $(this).val();
+                //     let employee_name = $('#employee_id option:selected').text().split(' - #')[0];
+
+                //     console.log("Employee ID:", employee_id);
+                //     console.log("Employee Name:", employee_name);
+
+                //     $('#employee_name').val(employee_name);
+                // });
 
                 if ($('#is_employee').is(':checked')) {
                     $('#aff_check_type').val('employee');
@@ -1185,3 +1305,56 @@ function gpt_get_employees_by_store() {
 
     wp_send_json_success($employees);
 }
+
+
+function gpt_log_affiliate_reward($type, $referrer, $referred_phone, $points, $store_id = '', $note = '', $source = '') {
+    global $wpdb;
+
+    $log_table = BIZGPT_PLUGIN_WP_AFFILIATE_LOGS;
+    $stats_table = BIZGPT_PLUGIN_WP_AFFILIATE_STATS;
+
+    $referrer_phone = ($type === 'referral') ? $referrer : '';
+
+    // Insert vào bảng log
+    $wpdb->insert($log_table, [
+        'type' => $type,
+        'referrer' => $referrer,
+        'referrer_phone' => $referrer_phone,
+        'referred_phone' => $referred_phone,
+        'points_rewarded' => $points,
+        'note' => $note,
+        'source' => $source,
+        'store_id' => $store_id,
+        'created_at' => current_time('mysql'),
+    ]);
+
+    // Nếu là referral thì cập nhật bảng stats
+    if ($type === 'referral' && !empty($referrer_phone)) {
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $stats_table WHERE referrer_phone = %s LIMIT 1", $referrer_phone
+        ));
+
+        if ($existing) {
+            $wpdb->update($stats_table, [
+                'total_referrals' => $existing->total_referrals + 1,
+                'total_points_earned' => $existing->total_points_earned + $points,
+                'last_referral_date' => current_time('mysql'),
+                'updated_at' => current_time('mysql'),
+            ], ['referrer_phone' => $referrer_phone]);
+        } else {
+            $wpdb->insert($stats_table, [
+                'referrer_phone' => $referrer_phone,
+                'referrer_name' => '',
+                'total_referrals' => 1,
+                'total_points_earned' => $points,
+                'first_referral_date' => current_time('mysql'),
+                'last_referral_date' => current_time('mysql'),
+                'created_at' => current_time('mysql'),
+                'updated_at' => current_time('mysql'),
+            ]);
+        }
+    }
+}
+
+
+

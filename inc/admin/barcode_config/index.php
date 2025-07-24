@@ -24,47 +24,47 @@ function gpt_render_duyet_barcode_page() {
 
     ?>
     
-    <div class="wrap">
-        <h1>Danh sách phiên cần duyệt</h1>
-
-        <form method="get" style="margin-bottom: 20px;">
-            <input type="hidden" name="page" value="gpt-browse-barcodes">
-            <label>Lọc theo ngày: 
+    <h1>Danh sách phiên cần duyệt</h1>
+    <div class="ux-row" style="margin-bottom: 16px;">
+        <form method="get" class="row form-row" style="align-items: flex-end; width: 100%;">
+            <div class="col large-2">
+                <label>Lọc theo ngày:</label>
                 <input type="date" name="filter_date" value="<?php echo esc_attr($selected_date); ?>">
-            </label>
-            <button type="submit" class="button">Lọc</button>
+            </div>
+            <div class="col large-1">
+                <button type="submit" class="button primary">Lọc</button>
+            </div>
         </form>
-
-        <table class="widefat striped">
-            <thead>
-                <tr>
-                    <th>Session</th>
-                    <th>Số lượng mã</th>
-                    <th>Ngày tạo gần nhất</th>
-                    <th>Thao tác</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($sessions as $session): ?>
-                <tr>
-                    <td><?php echo esc_html($session->session); ?></td>
-                    <td><?php echo esc_html($session->total); ?></td>
-                    <td>
-                        <?php
-                        $ngay = $wpdb->get_var($wpdb->prepare("SELECT MAX(created_at) FROM $table WHERE session = %s", $session->session));
-                        echo esc_html($ngay);
-                        ?>
-                    </td>
-                    <td>
-                        <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=view&session=' . urlencode($session->session)); ?>" class="button">Xem mã</a>
-                        <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=approve&session=' . urlencode($session->session)); ?>" class="button button-primary">Duyệt tất cả</a>
-                        <a href="' . admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=delete&session=' . urlencode($session)) . '" class="button button-danger" onclick="return confirm(\'Bạn có chắc muốn xoá toàn bộ mã trong phiên này?\')">Xoá</a>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
     </div>
+    <table class="widefat striped">
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Số lượng mã</th>
+                <th>Ngày tạo gần nhất</th>
+                <th>Thao tác</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($sessions as $session): ?>
+            <tr>
+                <td><?php echo esc_html($session->session); ?></td>
+                <td><?php echo esc_html($session->total); ?></td>
+                <td>
+                    <?php
+                    $ngay = $wpdb->get_var($wpdb->prepare("SELECT MAX(created_at) FROM $table WHERE session = %s", $session->session));
+                    echo esc_html($ngay);
+                    ?>
+                </td>
+                <td>
+                    <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=view&session=' . urlencode($session->session)); ?>" class="button">Xem mã</a>
+                    <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=approve&session=' . urlencode($session->session)); ?>" class="button button-primary">Duyệt tất cả</a>
+                    <a href="' . admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=delete&session=' . urlencode($session)) . '" class="button button-danger" onclick="return confirm(\'Bạn có chắc muốn xoá toàn bộ mã trong phiên này?\')">Xoá</a>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
     <?php
 
     if (isset($_GET['action'], $_GET['session']) && $_GET['action'] === 'view') {
@@ -82,7 +82,7 @@ function gpt_render_duyet_barcode_page() {
             return;
         }
 
-        echo '<h2>Chi tiết phiên: ' . esc_html($session) . '</h2>';
+        echo '<h2 style="margin-top: 24px;">Chi tiết phiên: ' . esc_html($session) . '</h2>';
         echo '<table class="widefat striped">';
         echo '<thead>
             <tr>

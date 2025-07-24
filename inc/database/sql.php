@@ -2,8 +2,7 @@
 
 register_activation_hook(__FILE__, 'gpt_plugin_activate');
 #add_action('admin_init', 'gpt_plugin_activate');
-
-
+// update_barcode_table_columns();
 function gpt_plugin_activate() {
     gpt_create_or_update_tables();
     gpt_create_ranking_table();
@@ -13,31 +12,32 @@ function gpt_plugin_activate() {
     gpt_create_store_tables();
     gpt_create_employee_tables();
     gpt_create_exchange_table();
+    gpt_create_table_box();
+    gpt_create_gpt_affiliate_logs_table();
+    create_wp_order_refund_table();
     // update_barcode_table_columns();
     // update_existing_log_table_for_affiliate();
     update_option('bizgpt_plugin_db_version', BIZGPT_PLUGIN_DB_VERSION);
 }
 
-// function update_barcode_table_columns() {
-//     global $wpdb;
-//     $table_name = BIZGPT_PLUGIN_WP_BARCODE;
-//     $columns_to_add = [
-//         'token' => "ALTER TABLE $table_name ADD COLUMN token CHAR(4) DEFAULT '' AFTER barcode_check",
-//         'qr_code_url' => "ALTER TABLE $table_name ADD COLUMN qr_code_url TEXT DEFAULT NULL AFTER session",
-//         'barcode_url' => "ALTER TABLE $table_name ADD COLUMN barcode_url TEXT DEFAULT NULL AFTER qr_code_url",
-//         'order_by_product_id' => "ALTER TABLE $table_name ADD COLUMN order_by_product_id TEXT DEFAULT NULL AFTER barcode_url",
-//     ];
+function update_barcode_table_columns() {
+    global $wpdb;
+    $table_name = BIZGPT_PLUGIN_WP_BARCODE;
+    $columns_to_add = [
+        'distributor' => "ALTER TABLE $table_name ADD COLUMN distributor CHAR(4) DEFAULT '' AFTER channel",
+        'lot' => "ALTER TABLE $table_name ADD COLUMN lot CHAR(4) DEFAULT '' AFTER distributor",
+    ];
 
-//     foreach ($columns_to_add as $column => $sql) {
-//         $column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE '$column'");
-//         if (empty($column_exists)) {
-//             $wpdb->query($sql);
-//             error_log("✅ Added column $column to $table_name");
-//         } else {
-//             error_log("ℹ️ Column $column already exists in $table_name");
-//         }
-//     }
-// }
+    foreach ($columns_to_add as $column => $sql) {
+        $column_exists = $wpdb->get_results("SHOW COLUMNS FROM $table_name LIKE '$column'");
+        if (empty($column_exists)) {
+            $wpdb->query($sql);
+            error_log("✅ Added column $column to $table_name");
+        } else {
+            error_log("ℹ️ Column $column already exists in $table_name");
+        }
+    }
+}
 
 // function update_existing_log_table_for_affiliate() {
 //     global $wpdb;
@@ -63,6 +63,67 @@ function gpt_plugin_activate() {
 //         }
 //     }
 // }
+
+function create_wp_order_refund_table() {
+    global $wpdb;
+
+    $table_name = BIZGPT_PLUGIN_WP_REFUND_ORDER;
+
+    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+        id INT(11) NOT NULL AUTO_INCREMENT,
+        title VARCHAR(255) NOT NULL,
+        refund_id VARCHAR(255) NOT NULL,
+        user VARCHAR(255) NOT NULL,
+        list_barcode TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        refund_time DATETIME NOT NULL,
+        PRIMARY KEY (id)
+    ) {$wpdb->get_charset_collate()};";
+
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+}
+
+function gpt_create_gpt_affiliate_logs_table() {
+    global $wpdb;
+
+    $table_name = BIZGPT_PLUGIN_WP_AFFILIATE_LOGS;
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+        id INT NOT NULL AUTO_INCREMENT,
+        type VARCHAR(20),
+        referrer VARCHAR(255),
+        referrer_phone VARCHAR(255),
+        referred_phone VARCHAR(255),
+        points_rewarded INT,
+        note LONGTEXT DEFAULT '',
+        source varchar(50),
+        store_id VARCHAR(255) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id)
+    ) $charset_collate;";
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
+function gpt_create_distributors_table() {
+    global $wpdb;
+    $table_name = BIZGPT_PLUGIN_WP_DISTRIBUTORS;
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE IF NOT EXISTS  $table_name (
+        id INT NOT NULL AUTO_INCREMENT,
+        title VARCHAR(255),
+        channel_id INT(20),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id)
+    ) $charset_collate;";
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
 
 function gpt_create_sales_channels_table() {
     global $wpdb;
@@ -169,6 +230,7 @@ function gpt_create_store_tables() {
         address text NOT NULL,
         image_url varchar(255) DEFAULT '',
         channel_id mediumint(9) NOT NULL,
+        distributor_id INT(20),
         created_at datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -197,6 +259,34 @@ function gpt_create_employee_tables() {
 
     dbDelta($sql_employee);
 }
+
+function gpt_create_table_box() {
+    global $wpdb;
+    $table_name = BIZGPT_PLUGIN_WP_BOX_MANAGER;
+
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE $table_name (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        barcode VARCHAR(255) NOT NULL,
+        barcode_check VARCHAR(255) DEFAULT '',
+        status VARCHAR(50) DEFAULT 'pending',
+        province VARCHAR(100) DEFAULT '',
+        channel VARCHAR(100) DEFAULT '',
+        session VARCHAR(50) DEFAULT '',
+        list_barcode LONGTEXT DEFAULT '',
+        qr_code_url TEXT,
+        barcode_url TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY barcode (barcode)
+    ) $charset_collate;";
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
 
 function gpt_create_or_update_tables() {
     global $wpdb;
@@ -257,7 +347,7 @@ function gpt_create_or_update_tables() {
             phone_referrer VARCHAR(20) NULL,
             referrer_name VARCHAR(255) NULL,
             is_affiliate_reward TINYINT(1) DEFAULT 0,
-            user_status VARCHAR(255) NULL,
+            u_status VARCHAR(255) DEFAULT '',
             note_status VARCHAR(255) NULL,
             aff_by_store_id INT(10) NULL,
             aff_by_employee_code INT(10) NULL,

@@ -15,6 +15,7 @@ define ('BIZGPT_PLUGIN_WP_LOGS', $wpdb->prefix . 'gpt_logs');
 // define ('BIZGPT_PLUGIN_WP_CUSTOMERS', $wpdb->prefix . 'gpt_customers');
 define ('BIZGPT_PLUGIN_WP_LOCATION_WARNINGS', $wpdb->prefix . 'gpt_location_warnings');
 define ('BIZGPT_PLUGIN_WP_AFFILIATE_STATS', $wpdb->prefix . 'gpt_affiliate_stats');
+define ('BIZGPT_PLUGIN_WP_AFFILIATE_LOGS', $wpdb->prefix . 'gpt_affiliate_logs');
 define ('BIZGPT_PLUGIN_WP_SAVE_USERS', $wpdb->prefix . 'gpt_users');
 define ('BIZGPT_PLUGIN_WP_RANKINGS', $wpdb->prefix . 'gpt_rankings');
 define ('BIZGPT_PLUGIN_WP_ORDER_PRODUCTS', $wpdb->prefix . 'gpt_product_orders');
@@ -23,12 +24,18 @@ define ('BIZGPT_PLUGIN_WP_CHANNELS', $wpdb->prefix . 'gpt_channels');
 define ('BIZGPT_PLUGIN_WP_EXCHANGE_CODE_FOR_GIFT', $wpdb->prefix . 'gpt_exchange_gifts');
 define ('BIZGPT_PLUGIN_WP_STORE_LIST', $wpdb->prefix . 'gpt_stores');
 define ('BIZGPT_PLUGIN_WP_EMPLOYEES', $wpdb->prefix . 'gpt_employees');
+define('BIZGPT_PLUGIN_WP_BOX_MANAGER', $wpdb->prefix . 'gpt_box_manager');
+define('BIZGPT_PLUGIN_WP_DISTRIBUTORS', $wpdb->prefix . 'gpt_distributors');
+define('BIZGPT_PLUGIN_WP_REFUND_ORDER', $wpdb->prefix . 'gpt_refund_order');
 
 // Admin
 include plugin_dir_path(__FILE__) . 'inc/admin/index.php';
 include plugin_dir_path(__FILE__) . 'inc/database/sql.php';
 // Front end
 include plugin_dir_path(__FILE__) . 'inc/post_type/order_check.php';
+include plugin_dir_path(__FILE__) . 'inc/post_type/import_check.php';
+include plugin_dir_path(__FILE__) . 'inc/post_type/refund_check.php';
+
 include plugin_dir_path(__FILE__) . 'frontend/view_form.php';
 include plugin_dir_path(__FILE__) . 'frontend/ranking.php';
 include plugin_dir_path(__FILE__) . 'frontend/index.php';
@@ -43,6 +50,7 @@ include plugin_dir_path(__FILE__) . 'frontend/shortcode.php';
 
 add_action('admin_enqueue_scripts', function($hook) {
     if (strpos($hook, 'gpt') !== false) { 
+        wp_enqueue_style('tabler-icons','https://unpkg.com/@tabler/icons/iconfont/tabler-icons.min.css',[],'latest');
         wp_enqueue_style('gpt-admin-style', plugin_dir_url(__FILE__) . 'assets/css/gpt-admin.css');
     }
 });

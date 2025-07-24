@@ -26,7 +26,7 @@ function gpt_display_featured_product_checkbox() {
     $reward_points = get_post_meta(get_the_ID(), '_reward_points', true);
     if ( $product->get_meta( '_is_featured_product', true ) === 'yes' ): ?>
         <?php $stock_quantity = $product->get_stock_quantity(); if ($stock_quantity > 0): ?>
-            <div class="button-doidiem-qr button" data-point="<?php echo $reward_points; ?>" data-name="<?php echo $product->get_title(); ?>" data-id="<?php echo $product->get_id(); ?>">Đổi bằng <?php echo $reward_points; ?> điểm</div>
+            <div class="button-doidiem-qr button btn-gradient" data-point="<?php echo $reward_points; ?>" data-name="<?php echo $product->get_title(); ?>" data-id="<?php echo $product->get_id(); ?>">Đổi bằng <?php echo $reward_points; ?> điểm</div>
         <?php else: ?>
             <div class="out-of-stock-message error-small"><span>❗</span> Rất tiếc, sản phẩm này đã hết hàng.</div>
         <?php endif; ?>
@@ -159,7 +159,7 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                 width: 100%;
                 margin: 0;
                 margin-bottom: 16px;
-                background-color: #faf3e8;
+                background-color: #F1F5F7;
                 border: 0px;
                 box-shadow: none;
                 border-radius: 8px;

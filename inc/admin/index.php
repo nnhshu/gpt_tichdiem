@@ -1,5 +1,4 @@
 <?php
-
 include plugin_dir_path(__FILE__) . './config_page.php';
 include plugin_dir_path(__FILE__) . './order_check_lookup.php';
 // Affiliate
@@ -9,49 +8,56 @@ include plugin_dir_path(__FILE__) . './aff/gpt_marketing_config_page.php';
 // Barcode
 include plugin_dir_path(__FILE__) . './barcode_config/index.php';
 include plugin_dir_path(__FILE__) . './barcode_config/list_code.php';
-// Channel
-include plugin_dir_path(__FILE__) . './channels/index.php';
+include plugin_dir_path(__FILE__) . './barcode_config/box_list_code.php';
 // Ranking
 include plugin_dir_path(__FILE__) . './ranking/index.php';
 // Tích & đổi điểm
-include plugin_dir_path(__FILE__) . './gpt_manage_points_list/accumulate_list.php';
-include plugin_dir_path(__FILE__) . './gpt_manage_points_list/exchange_list.php';
-include plugin_dir_path(__FILE__) . './gpt_manage_points_list/warning.php';
+include plugin_dir_path(__FILE__) . './manage_points_list/accumulate_list.php';
+include plugin_dir_path(__FILE__) . './manage_points_list/exchange_list.php';
+include plugin_dir_path(__FILE__) . './manage_points_list/warning.php';
+include plugin_dir_path(__FILE__) . './manage_points_list/store_reports.php';
 // cửa hàng & nhân viên
-include plugin_dir_path(__FILE__) . './gpt_manage_employee_store/store.php';
-include plugin_dir_path(__FILE__) . './gpt_manage_employee_store/employee.php';
+include plugin_dir_path(__FILE__) . './manage_employee_store/store.php';
+include plugin_dir_path(__FILE__) . './manage_employee_store/employee.php';
+include plugin_dir_path(__FILE__) . './manage_employee_store/distributors.php';
+include plugin_dir_path(__FILE__) . './manage_employee_store/sale_channels.php';
+// Settings
+include plugin_dir_path(__FILE__) . './settings/setting_affiliate.php';
+include plugin_dir_path(__FILE__) . './settings/setting_identifier.php';
 
 
 add_action('admin_menu', function () {
-    add_menu_page('GPT Mã Cào Sản Phẩm', 'GPT Mã Cào Sản Phẩm', 'edit_posts', 'gpt-macao', '__return_null', 'dashicons-tickets', 6);
+    add_menu_page('Cấu hình tem công nghệ', 'Cấu hình tem công nghệ', 'edit_posts', 'gpt-macao', '__return_null', 'dashicons-tickets', 5);
 
     if (current_user_can('manage_options')) {
         // Cấu hình tab
         add_submenu_page(
             'gpt-macao',
-            'Cấu hình hệ thống',
-            'Cấu hình hệ thống',
+            'Cấu hình chung',
+            'Cấu hình chung',
             'manage_options',
             'gpt-config',
-            'gpt_render_config_tabs_page'
+            'gpt_render_config_tabs_page',
+            0 // Luôn ở vị trí đầu tiên
         );
         add_submenu_page(
             'gpt-macao',
-            'Quản lý mã',
-            'Quản lý mã',
+            'Danh sách mã',
+            'Danh sách mã',
             'manage_options',
             'gpt-config-barcode',
-            'gpt_render_config_barcode_page'
+            'gpt_render_config_barcode_page',
+            1 // Luôn ở vị trí đầu tiên
         );
         add_submenu_page(
             'gpt-macao',
-            'DS cửa hàng & nhân viên',
-            'DS cửa hàng & nhân viên',
+            'Cấu hình kênh bán',
+            'Cấu hình kênh bán',
             'manage_options',
             'gpt-store-employee',
             'gpt_render_store_employee_page'
         );
-        add_submenu_page(
+        /*add_submenu_page(
             'gpt-macao',
             'DS tích & đổi điểm',
             'DS tích & đổi điểm',
@@ -66,7 +72,7 @@ add_action('admin_menu', function () {
             'manage_options',
             'gpt-affiliate-report',
             'gpt_render_config_affiliate_page'
-        );
+        );*/
 
         
 
@@ -89,31 +95,123 @@ add_action('admin_menu', function () {
         // add_submenu_page('gpt-macao', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-nguoi-gioi-thieu-thanh-cong', 'gpt_successful_referrer_page');
     }
 
-    if (current_user_can('edit_posts')) {
-        add_submenu_page('gpt-macao', 'Tra cứu mã cào', 'Tra cứu mã cào', 'edit_posts', 'gpt-tra-cuu-ma-cao', 'gpt_render_order_check_lookup');
-    }
+    
+
+    add_menu_page('Báo cáo tích điểm', 'Báo cáo tích điểm', 'edit_posts', 'gpt-report', 'gpt-customer-list', 'dashicons-tickets', 5);
+    // add_menu_page('Quản lý xuất nhập kho', 'Quản lý xuất nhập kho', 'edit_posts', 'gpt-warehouse', 'gpt_render_warehouse_tabs_page', 'dashicons-tickets', 5);
+    if (current_user_can('manage_options')) {
+        // Cấu hình tab
+        add_submenu_page(
+            'gpt-report',
+            'DSKH tích điểm',
+            'DSKH tích điểm',
+            'manage_options',
+            'gpt-customer-list',
+            'gpt_customer_list_page'
+        );
+        add_submenu_page(
+            'gpt-report',
+            'DSKH đổi điểm',
+            'DSKH đổi điểm',
+            'manage_options',
+            'gpt-exchange-list',
+            'gpt_render_exchange_list_page'
+        );
+        add_submenu_page(
+            'gpt-report',
+            'DS cảnh báo sai vị trí',
+            'DS cảnh báo sai vị trí',
+            'manage_options',
+            'gpt-warning-list',
+            'gpt_location_warnings_page'
+        );
+            add_submenu_page(
+            'gpt-report',
+            'Báo cáo tích điểm theo cửa hàng',
+            'Báo cáo tích điểm theo cửa hàng',
+            'manage_options',
+            'gpt-affiliate-reports',
+            'gpt_affiliate_reports_page_callback'
+        );
+        add_submenu_page('gpt-report', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-referred-person', 'gpt_referral_list_page');
+        add_submenu_page('gpt-report', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-successful-referrer', 'gpt_successful_referrer_page');
+        
+
+        // add_submenu_page('gpt-macao', 'Cấu hình chung', 'Cấu hình chung', 'manage_options', 'gpt-macao', 'gpt_config_page');
+        // add_submenu_page('gpt-macao', 'Cấu hình thông báo', 'Cấu hình thông báo', 'manage_options', 'gpt-cau-hinh-thong-bao', 'gpt_notice_config_page');
+        // add_submenu_page('gpt-macao', 'Cấu hình kênh BH', 'Cấu hình kênh BH', 'manage_options', 'gpt-sales-channels', 'gpt_render_sales_channels_page');
+        // add_submenu_page(
+        //     'gpt-macao',
+        //     'Duyệt mã cào',
+        //     'Duyệt mã cào',
+        //     'manage_options',
+        //     'gpt-browse-barcodes',
+        //     'gpt_render_duyet_barcode_page'
+        // );
+        // add_submenu_page('gpt-macao', 'DS mã cào', 'DS mã cào', 'manage_options', 'gpt-danh-sach-ma-cao', 'gpt_macao_list_page');
+        // add_submenu_page('gpt-macao', 'DSKH tích điểm', 'DSKH tích điểm', 'manage_options', 'gpt-khach-hang', 'gpt_customer_list_page');
+        // add_submenu_page('gpt-macao', 'DSKH đổi điểm', 'DSKH đổi điểm', 'manage_options', 'gpt-doi-diem-list', 'gpt_render_exchange_list_page');
+        // add_submenu_page('gpt-macao', 'DS cảnh báo', 'DS cảnh báo', 'manage_options', 'gpt-canh-bao-vi-tri', 'gpt_location_warnings_page');
+        // add_submenu_page('gpt-macao', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-nguoi-duoc-gioi-thieu', 'gpt_referral_list_page');
+        // add_submenu_page('gpt-macao', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-nguoi-gioi-thieu-thanh-cong', 'gpt_successful_referrer_page');
+    }   
+
 });
+
+function gpt_render_warehouse_tabs_page() {
+    $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'ordercheck';
+
+    echo '<div class="wrap">';
+    echo '<h1>Quản lý Xuất Nhập Kho</h1>';
+    echo '<nav class="nav-tab-wrapper">';
+    echo '<a href="?page=gpt-warehouse&tab=ordercheck" class="nav-tab ' . ($active_tab == 'ordercheck' ? 'nav-tab-active' : '') . '">📦 Order Check</a>';
+    echo '<a href="?page=gpt-warehouse&tab=warehouse" class="nav-tab ' . ($active_tab == 'warehouse' ? 'nav-tab-active' : '') . '">🚚 Xuất kho</a>';
+    echo '</nav>';
+
+    echo '<div style="margin-top: 20px;">';
+    switch ($active_tab) {
+        case 'ordercheck':
+            gpt_render_ordercheck_tab();
+            break;
+        case 'warehouse':
+            gpt_render_xuatkho_tab();
+            break;
+        default:
+            echo '<p>Chưa có nội dung.</p>';
+            break;
+    }
+    echo '</div>';
+    echo '</div>';
+}
+
 
 // Quản lí cửa hàng & nhân viên
 function gpt_render_store_employee_page() {
-    $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'store';
+    $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'channels';
 
     echo '<div class="wrap">';
     echo '<h1 class="nav-tab-wrapper">';
 
+    echo '<a href="?page=gpt-store-employee&tab=channels" class="nav-tab ' . ($active_tab === 'channels' ? 'nav-tab-active' : '') . '">Kênh bán hàng</a>';
+    echo '<a href="?page=gpt-store-employee&tab=distributor" class="nav-tab ' . ($active_tab === 'distributor' ? 'nav-tab-active' : '') . '">Nhà phân phối</a>';
     echo '<a href="?page=gpt-store-employee&tab=store" class="nav-tab ' . ($active_tab === 'store' ? 'nav-tab-active' : '') . '">Cửa hàng</a>';
-    echo '<a href="?page=gpt-store-employee&tab=employee" class="nav-tab ' . ($active_tab === 'employee' ? 'nav-tab-active' : '') . '">Nhân viên</a>';
+    // echo '<a href="?page=gpt-store-employee&tab=employee" class="nav-tab ' . ($active_tab === 'employee' ? 'nav-tab-active' : '') . '">Nhân viên</a>';
 
     echo '</h1>';
     echo '<div class="tab-content">';
 
     switch ($active_tab) {
-        case 'employee':
-            gpt_render_employee_tab();
+        // case 'employee':
+        //     gpt_render_employee_tab();
+        //     break;
+        case 'distributor':
+            gpt_render_distributors_tab();
             break;
         case 'store':
-        default:
             gpt_render_store_tab();
+            break;
+        default:
+            gpt_render_sales_channels_page();
             break;
     }
 
@@ -127,8 +225,9 @@ function gpt_render_config_barcode_page() {
     echo '<div class="wrap">';
     echo '<h1 class="nav-tab-wrapper">';
 
-    echo '<a href="?page=gpt-config-barcode&tab=barcode" class="nav-tab ' . ($active_tab === 'barcode' ? 'nav-tab-active' : '') . '">Danh sách mã</a>';
-    echo '<a href="?page=gpt-config-barcode&tab=browse" class="nav-tab ' . ($active_tab === 'browse' ? 'nav-tab-active' : '') . '">Duyệt mã</a>';
+    echo '<a href="?page=gpt-config-barcode&tab=box_barcode" class="nav-tab ' . ($active_tab === 'box_barcode' ? 'nav-tab-active' : '') . '">Danh sách mã định danh thùng</a>';
+    echo '<a href="?page=gpt-config-barcode&tab=barcode" class="nav-tab ' . ($active_tab === 'barcode' ? 'nav-tab-active' : '') . '">Danh sách mã định danh sản phẩm</a>';
+    echo '<a href="?page=gpt-config-barcode&tab=browse" class="nav-tab ' . ($active_tab === 'browse' ? 'nav-tab-active' : '') . '">Duyệt mã định danh sản phẩm</a>';
 
     echo '</h1>';
     echo '<div class="tab-content">';
@@ -137,9 +236,11 @@ function gpt_render_config_barcode_page() {
         case 'browse':
             gpt_render_duyet_barcode_page();
             break;
-        case 'barcode':
+        case 'box_barcode':
+            gpt_box_barcode_list_page();
+            break;
         default:
-            gpt_macao_list_page();
+            gpt_barcode_list_page();
             break;
     }
 
@@ -205,27 +306,28 @@ function gpt_render_config_affiliate_page() {
 
 // Quản lí cấu hình chung
 function gpt_render_config_tabs_page() {
-    $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'cau-hinh-chung';
+    $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'settings';
 
     echo '<div class="wrap">';
     echo '<h1 class="nav-tab-wrapper">';
     
-    echo '<a href="?page=gpt-config&tab=cau-hinh-chung" class="nav-tab ' . ($active_tab == 'cau-hinh-chung' ? 'nav-tab-active' : '') . '">Cấu hình chung</a>';
-    echo '<a href="?page=gpt-config&tab=thong-bao" class="nav-tab ' . ($active_tab == 'thong-bao' ? 'nav-tab-active' : '') . '">Cấu hình thông báo</a>';
-    echo '<a href="?page=gpt-config&tab=kenh-ban-hang" class="nav-tab ' . ($active_tab == 'kenh-ban-hang' ? 'nav-tab-active' : '') . '">Cấu hình kênh BH</a>';
+    echo '<a href="?page=gpt-config&tab=settings" class="nav-tab ' . ($active_tab == 'settings' ? 'nav-tab-active' : '') . '">Cấu hình mã định danh</a>';
+    echo '<a href="?page=gpt-config&tab=notice" class="nav-tab ' . ($active_tab == 'notice' ? 'nav-tab-active' : '') . '">Cấu hình thông báo</a>';
+    echo '<a href="?page=gpt-config&tab=affiliate" class="nav-tab ' . ($active_tab == 'affiliate' ? 'nav-tab-active' : '') . '">Cấu hình affiliate</a>';
 
     echo '</h1>';
 
     echo '<div class="tab-content">';
     switch ($active_tab) {
-        case 'thong-bao':
+        case 'notice':
             gpt_notice_config_page();
             break;
-        case 'kenh-ban-hang':
-            gpt_render_sales_channels_page();
+        case 'affiliate':
+            gpt_affiliate_setting_page();
             break;
+            
         default:
-            gpt_config_page();
+            gpt_setting_identifier_page();
             break;
     }
     echo '</div></div>';
@@ -299,4 +401,18 @@ function gpt_render_error_notice_editor() {
         'teeny' => true,
     ]);
 }
+
+add_action('admin_footer', function () {
+    ?>
+    <script>
+        jQuery(document).ready(function($) {
+            $('.gpt-select2').select2({
+                width: '100%',
+                placeholder: 'Chọn...',
+                allowClear: true
+            });
+        });
+    </script>
+    <?php
+});
 

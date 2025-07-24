@@ -2,51 +2,115 @@
 
 function gpt_referral_list_page() {
     global $wpdb;
-    $table = $wpdb->prefix . 'gpt_logs';
+    $table_logs = BIZGPT_PLUGIN_WP_LOGS;
 
-    // Lọc theo ngày hoặc người giới thiệu
     $where = "WHERE (phone_referrer IS NOT NULL OR referrer_name IS NOT NULL)";
-    if (!empty($_GET['date'])) {
+    
+    if (!empty($_GET['start_date']) && !empty($_GET['end_date'])) {
+        $start_date = sanitize_text_field($_GET['start_date']);
+        $end_date = sanitize_text_field($_GET['end_date']);
+        $where .= " AND DATE(time) BETWEEN '$start_date' AND '$end_date'";
+    } elseif (!empty($_GET['date'])) {
         $date = sanitize_text_field($_GET['date']);
         $where .= " AND DATE(time) = '$date'";
     }
-    if (!empty($_GET['ref'])) {
-        $ref = esc_sql($_GET['ref']);
-        $where .= " AND (referrer_name LIKE '%$ref%' OR phone_referrer LIKE '%$ref%')";
+    
+    if (!empty($_GET['phone_number'])) {
+        $phone_number = esc_sql($_GET['phone_number']);
+        $where .= " AND phone_referrer LIKE '%$phone_number%'";
     }
 
     $results = $wpdb->get_results("
-        SELECT id, customer_name, phone_number, referrer_name, phone_referrer, time, store
-        FROM $table
+        SELECT id, customer_name, phone_number, referrer_name, phone_referrer, created_at, aff_by_store_id
+        FROM $table_logs
         $where
-        ORDER BY time DESC
+        ORDER BY created_at DESC
         LIMIT 100
     ");
+    
+    ?>
+    <div class="bg_wrap">
+        <h1>Người được giới thiệu</h1>
+        <hr>
+        <div class="ux-row">
+            <form method="get" class="row form-row" style="align-items: flex-end; width: 100%;">
+                <input type="hidden" name="page" value="gpt-referred-person" />
+                <div class="col large-2">
+                    <label for="start_date">Từ ngày:</label>
+                    <input type="date" name="start_date" value="<?php echo esc_attr($_GET['start_date'] ?? ''); ?>" />
+                </div>
+                <div class="col large-2">
+                    <label for="end_date">Đến ngày:</label>
+                    <input type="date" name="end_date" value="<?php echo esc_attr($_GET['end_date'] ?? ''); ?>" />
+                </div>
+                <div class="col large-2">
+                    <label for="phone_number">Số điện thoại người giới thiệu:</label>
+                    <input type="text" name="phone_number" value="<?php echo esc_attr($_GET['phone_number'] ?? ''); ?>" />
+                </div>
+                <div class="col large-1">
+                    <div class="d-flex gap-1">
+                        <input type="submit" class="button button-primary" value="Lọc" />
+                        <a href="admin.php?page=gpt-referred-person" class="button button-danger">Reset Bộ Lọc</a>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <hr>
+        <table class="widefat fixed striped">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Khách hàng</th>
+                    <th>SĐT</th>
+                    <th>[Người giới thiệu] - [Số điện thoại]</th>
+                    <th>Chi nhánh</th>
+                    <th>Thời gian</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $i = 1;
+                foreach ($results as $row) :
+                    $store = getStorebyId($row->aff_by_store_id);
+                    $store_name = $store ? esc_html($store) : 'N/A';
+                ?>
+                    <tr>
+                        <td><?php echo $i++; ?></td>
+                        <td><?php echo esc_html($row->customer_name); ?></td>
+                        <td><?php echo esc_html($row->phone_number); ?></td>
+                        <?php if($row->referrer_name || $row->phone_referrer): ?>
+                        <td><?php echo esc_html($row->referrer_name . ' - [' . $row->phone_referrer . ']'); ?></td>
+                        <?php else: ?>
+                        <td></td>
+                        <?php endif; ?>
+                        <td><?php echo $store_name; ?></td>
+                        <td><?php echo esc_html($row->created_at); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
 
-    echo '<div class="wrap"><h1>Người được giới thiệu</h1>';
-    echo '<form method="get" style="margin-bottom:20px;">
-        <input type="hidden" name="page" value="gpt-nguoi-duoc-gioi-thieu" />
-        Ngày: <input type="date" name="date" value="' . esc_attr($_GET['date'] ?? '') . '" />
-        Người giới thiệu: <input type="text" name="ref" value="' . esc_attr($_GET['ref'] ?? '') . '" />
-        <input type="submit" class="button" value="Lọc" />
-    </form>';
-
-    echo '<table class="widefat fixed striped"><thead><tr>
-        <th>STT</th><th>Khách hàng</th><th>SĐT</th><th>Người giới thiệu</th><th>Chi nhánh</th><th>Thời gian</th>
-    </tr></thead><tbody>';
-
-    $i = 1;
-    foreach ($results as $row) {
-        echo '<tr>
-            <td>' . $i++ . '</td>
-            <td>' . esc_html($row->customer_name) . '</td>
-            <td>' . esc_html($row->phone_number) . '</td>
-            <td>' . esc_html($row->referrer_name . ' (' . $row->phone_referrer . ')') . '</td>
-            <td>' . esc_html($row->store) . '</td>
-            <td>' . esc_html($row->time) . '</td>
-        </tr>';
-    }
-
-    echo '</tbody></table></div>';
+        </table>
+    </div>
+    <?php
 }
+
+function getStorebyId($store_id) {
+    global $wpdb;
+
+    $store_id = intval($store_id);
+
+    $table_name = BIZGPT_PLUGIN_WP_STORE_LIST;
+
+    $store = $wpdb->get_row($wpdb->prepare("
+        SELECT * FROM $table_name WHERE id = %d
+    ", $store_id));
+
+    if ($store) {
+        return $store->store_name;
+    } else {
+        return null;
+    }
+}
+
+
 

@@ -328,7 +328,7 @@ jQuery(document).ready(function($) {
                                         <th>Ngày</th>
                                         <th>Họ và tên</th>
                                         <th>Số điện thoại</th>
-                                        <th>Mã cào</th>
+                                        <th>Mã định danh</th>
                                         <th>Sản phẩm</th>
                                         <th>Điểm</th>
                                     </tr>
@@ -428,7 +428,7 @@ function gpt_lookup_point_of_user_shortcode() {
                 <input type="text" id="captcha_answer" placeholder="Nhập kết quả" required>
             </div>
 
-            <button type="submit">Tra cứu</button>
+            <button type="submit" class="btn-gradient">Tra cứu</button>
         </form>
     </div>
     <div id="search_result"></div>
