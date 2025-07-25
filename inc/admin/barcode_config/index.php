@@ -46,6 +46,7 @@ function gpt_render_duyet_barcode_page() {
             </tr>
         </thead>
         <tbody>
+            <?php if($sessions): ?>
             <?php foreach ($sessions as $session): ?>
             <tr>
                 <td><?php echo esc_html($session->session); ?></td>
@@ -59,10 +60,15 @@ function gpt_render_duyet_barcode_page() {
                 <td>
                     <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=view&session=' . urlencode($session->session)); ?>" class="button">Xem mã</a>
                     <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=approve&session=' . urlencode($session->session)); ?>" class="button button-primary">Duyệt tất cả</a>
-                    <a href="' . admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=delete&session=' . urlencode($session)) . '" class="button button-danger" onclick="return confirm(\'Bạn có chắc muốn xoá toàn bộ mã trong phiên này?\')">Xoá</a>
+                    <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=delete&session=' . urlencode($session->session)); ?>" class="button button-danger" onclick="return confirm(\'Bạn có chắc muốn xoá toàn bộ mã trong phiên này?\')">Xoá</a>
                 </td>
             </tr>
             <?php endforeach; ?>
+            <?php else: ?>
+                <tr>
+                <td colspan="4">Không có phiên cần cập nhật</td>
+                </tr>
+            <?php endif; ?>
         </tbody>
     </table>
     <?php

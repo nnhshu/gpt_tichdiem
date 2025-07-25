@@ -3,20 +3,20 @@
 function register_order_check_post_type() {
     register_post_type('order_check', array(
         'labels' => array(
-            'name' => 'Truy xuất đơn hàng',
-            'singular_name' => 'Truy xuất đơn hàng',
-            'add_new' => 'Thêm đơn hàng truy xuất mới',
-            'add_new_item' => 'Thêm mới đơn hàng',
-            'edit_item' => 'Chỉnh sửa đơn hàng',
-            'new_item' => 'Thêm đơn hàng mới',
-            'view_item' => 'Xem mã định danh trong đơn hàng',
-            'search_items' => 'Tìm đơn hàng truy xuất',
+            'name' => 'Xuất đơn định danh',
+            'singular_name' => 'Xuất đơn định danh',
+            'add_new' => 'Thêm đơn định danh',
+            'add_new_item' => 'Thêm đơn định danh',
+            'edit_item' => 'Chỉnh sửa đơn định danh',
+            'new_item' => 'Thêm đơn định danh',
+            'view_item' => 'Xem mã định danh trong đơn định danh',
+            'search_items' => 'Tìm đơn định danh truy xuất',
             'not_found' => 'Không tìm thấy',
             'not_found_in_trash' => 'Không có trong thùng rác'
         ),
         'public' => true,
         'show_ui' => true,
-        'show_in_menu' => true,
+        'show_in_menu' => 'gpt-manager-tem',
         'supports' => array('title'),
         'has_archive' => true,
     ));

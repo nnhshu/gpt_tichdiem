@@ -16,6 +16,7 @@ include plugin_dir_path(__FILE__) . './manage_points_list/accumulate_list.php';
 include plugin_dir_path(__FILE__) . './manage_points_list/exchange_list.php';
 include plugin_dir_path(__FILE__) . './manage_points_list/warning.php';
 include plugin_dir_path(__FILE__) . './manage_points_list/store_reports.php';
+include plugin_dir_path(__FILE__) . './manage_points_list/analytics_reports.php';
 // cửa hàng & nhân viên
 include plugin_dir_path(__FILE__) . './manage_employee_store/store.php';
 include plugin_dir_path(__FILE__) . './manage_employee_store/employee.php';
@@ -28,6 +29,8 @@ include plugin_dir_path(__FILE__) . './settings/setting_identifier.php';
 
 add_action('admin_menu', function () {
     add_menu_page('Cấu hình tem công nghệ', 'Cấu hình tem công nghệ', 'edit_posts', 'gpt-macao', '__return_null', 'dashicons-tickets', 5);
+    add_menu_page('Quản lý xuất nhập tồn tem công nghệ', 'Quản lý xuất nhập tồn tem công nghệ', 'edit_posts', 'gpt-manager-tem', '__return_null', 'dashicons-tickets', 5);
+    add_menu_page('Báo cáo tem công nghệ', 'Báo cáo tem công nghệ', 'edit_posts', 'gpt-analytics-reports', '__return_null', 'dashicons-tickets', 5);
 
     if (current_user_can('manage_options')) {
         // Cấu hình tab
@@ -38,7 +41,16 @@ add_action('admin_menu', function () {
             'manage_options',
             'gpt-config',
             'gpt_render_config_tabs_page',
-            0 // Luôn ở vị trí đầu tiên
+            0
+        );
+        add_submenu_page(
+            'gpt-macao',
+            'Tạo mã định danh',
+            'Tạo mã định danh',
+            'manage_options',
+            'gpt-setting-identifier',
+            'gpt_setting_identifier_page',
+            1
         );
         add_submenu_page(
             'gpt-macao',
@@ -47,7 +59,7 @@ add_action('admin_menu', function () {
             'manage_options',
             'gpt-config-barcode',
             'gpt_render_config_barcode_page',
-            1 // Luôn ở vị trí đầu tiên
+            2
         );
         add_submenu_page(
             'gpt-macao',
@@ -97,12 +109,18 @@ add_action('admin_menu', function () {
 
     
 
-    add_menu_page('Báo cáo tích điểm', 'Báo cáo tích điểm', 'edit_posts', 'gpt-report', 'gpt-customer-list', 'dashicons-tickets', 5);
-    // add_menu_page('Quản lý xuất nhập kho', 'Quản lý xuất nhập kho', 'edit_posts', 'gpt-warehouse', 'gpt_render_warehouse_tabs_page', 'dashicons-tickets', 5);
     if (current_user_can('manage_options')) {
         // Cấu hình tab
         add_submenu_page(
-            'gpt-report',
+            'gpt-analytics-reports',
+            'Báo cáo tổng hợp',
+            'Báo cáo tổng hợp',
+            'manage_options',
+            'gpt_analytics_reports_page',
+            'gpt_analytics_reports_page_callback'
+        );
+        add_submenu_page(
+            'gpt-analytics-reports',
             'DSKH tích điểm',
             'DSKH tích điểm',
             'manage_options',
@@ -110,7 +128,7 @@ add_action('admin_menu', function () {
             'gpt_customer_list_page'
         );
         add_submenu_page(
-            'gpt-report',
+            'gpt-analytics-reports',
             'DSKH đổi điểm',
             'DSKH đổi điểm',
             'manage_options',
@@ -118,7 +136,7 @@ add_action('admin_menu', function () {
             'gpt_render_exchange_list_page'
         );
         add_submenu_page(
-            'gpt-report',
+            'gpt-analytics-reports',
             'DS cảnh báo sai vị trí',
             'DS cảnh báo sai vị trí',
             'manage_options',
@@ -126,15 +144,15 @@ add_action('admin_menu', function () {
             'gpt_location_warnings_page'
         );
             add_submenu_page(
-            'gpt-report',
+            'gpt-analytics-reports',
             'Báo cáo tích điểm theo cửa hàng',
             'Báo cáo tích điểm theo cửa hàng',
             'manage_options',
             'gpt-affiliate-reports',
             'gpt_affiliate_reports_page_callback'
         );
-        add_submenu_page('gpt-report', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-referred-person', 'gpt_referral_list_page');
-        add_submenu_page('gpt-report', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-successful-referrer', 'gpt_successful_referrer_page');
+        add_submenu_page('gpt-analytics-reports', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-referred-person', 'gpt_referral_list_page');
+        add_submenu_page('gpt-analytics-reports', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-successful-referrer', 'gpt_successful_referrer_page');
         
 
         // add_submenu_page('gpt-macao', 'Cấu hình chung', 'Cấu hình chung', 'manage_options', 'gpt-macao', 'gpt_config_page');
@@ -157,33 +175,6 @@ add_action('admin_menu', function () {
     }   
 
 });
-
-function gpt_render_warehouse_tabs_page() {
-    $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'ordercheck';
-
-    echo '<div class="wrap">';
-    echo '<h1>Quản lý Xuất Nhập Kho</h1>';
-    echo '<nav class="nav-tab-wrapper">';
-    echo '<a href="?page=gpt-warehouse&tab=ordercheck" class="nav-tab ' . ($active_tab == 'ordercheck' ? 'nav-tab-active' : '') . '">📦 Order Check</a>';
-    echo '<a href="?page=gpt-warehouse&tab=warehouse" class="nav-tab ' . ($active_tab == 'warehouse' ? 'nav-tab-active' : '') . '">🚚 Xuất kho</a>';
-    echo '</nav>';
-
-    echo '<div style="margin-top: 20px;">';
-    switch ($active_tab) {
-        case 'ordercheck':
-            gpt_render_ordercheck_tab();
-            break;
-        case 'warehouse':
-            gpt_render_xuatkho_tab();
-            break;
-        default:
-            echo '<p>Chưa có nội dung.</p>';
-            break;
-    }
-    echo '</div>';
-    echo '</div>';
-}
-
 
 // Quản lí cửa hàng & nhân viên
 function gpt_render_store_employee_page() {
@@ -311,8 +302,8 @@ function gpt_render_config_tabs_page() {
     echo '<div class="wrap">';
     echo '<h1 class="nav-tab-wrapper">';
     
-    echo '<a href="?page=gpt-config&tab=settings" class="nav-tab ' . ($active_tab == 'settings' ? 'nav-tab-active' : '') . '">Cấu hình mã định danh</a>';
     echo '<a href="?page=gpt-config&tab=notice" class="nav-tab ' . ($active_tab == 'notice' ? 'nav-tab-active' : '') . '">Cấu hình thông báo</a>';
+    echo '<a href="?page=gpt-config&tab=products_gift" class="nav-tab ' . ($active_tab == 'products_gift' ? 'nav-tab-active' : '') . '">Cấu hình sản phẩm đổi quà</a>';
     echo '<a href="?page=gpt-config&tab=affiliate" class="nav-tab ' . ($active_tab == 'affiliate' ? 'nav-tab-active' : '') . '">Cấu hình affiliate</a>';
 
     echo '</h1>';
@@ -325,7 +316,9 @@ function gpt_render_config_tabs_page() {
         case 'affiliate':
             gpt_affiliate_setting_page();
             break;
-            
+        case 'products_gift':
+            gpt_setting_products_gift_page();
+            break; 
         default:
             gpt_setting_identifier_page();
             break;
@@ -352,25 +345,186 @@ function gpt_get_channel_name($channel_id) {
 add_action('admin_init', 'gpt_register_notice_settings');
 
 function gpt_notice_config_page() {
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && current_user_can('manage_options')) {
-        $new_content = wp_kses_post($_POST['gpt_error_notice_editor'] ?? '');
-        update_option('gpt_error_notice_editor', $new_content);
-        echo '<div class="updated notice is-dismissible"><p>Đã lưu thông báo lỗi.</p></div>';
-        $content = $new_content;
-    } else {
-        $content = get_option('gpt_error_notice_editor', '');
+    if (isset($_POST['submit_notice_config']) && wp_verify_nonce($_POST['notice_config_nonce'], 'save_notice_config')) {
+        
+        if (isset($_POST['messenger_link'])) {
+            $messenger_link = sanitize_url($_POST['messenger_link']);
+            update_option('gpt_messenger_link', $messenger_link);
+        }
+        
+        if (isset($_POST['gpt_error_notice_editor'])) {
+            $notice_content = wp_kses_post($_POST['gpt_error_notice_editor']);
+            update_option('gpt_error_notice_editor', $notice_content);
+        }
+        if (!empty($_FILES['gpt_logo_image']['name'])) {
+            $uploaded_logo = wp_handle_upload($_FILES['gpt_logo_image'], ['test_form' => false]);
+            if (!isset($uploaded_logo['error'])) {
+                update_option('gpt_logo_image_url', $uploaded_logo['url']);
+            }
+        }
+        
+        if (!empty($_FILES['gpt_messenger_icon']['name'])) {
+            $uploaded_messenger = wp_handle_upload($_FILES['gpt_messenger_icon'], ['test_form' => false]);
+            if (!isset($uploaded_messenger['error'])) {
+                update_option('gpt_messenger_icon_url', $uploaded_messenger['url']);
+            }
+        }
+        
+        if (!empty($_FILES['gpt_display_image']['name'])) {
+            $uploaded_display = wp_handle_upload($_FILES['gpt_display_image'], ['test_form' => false]);
+            if (!isset($uploaded_display['error'])) {
+                update_option('gpt_display_image_url', $uploaded_display['url']);
+            }
+        }
+        
+        add_action('admin_notices', function() {
+            echo '<div class="notice notice-success is-dismissible">';
+            echo '<p><strong>Thành công!</strong> Đã lưu cấu hình thông báo.</p>';
+            echo '</div>';
+        });
     }
 
-    echo '<div class="wrap"><h1>Cấu hình thông báo lỗi</h1>';
-    echo '<form method="post">';
-    wp_editor($content, 'gpt_error_notice_editor', [
-        'textarea_name' => 'gpt_error_notice_editor',
-        'media_buttons' => false,
-        'textarea_rows' => 6,
-        'teeny' => true,
-    ]);
-    submit_button('Lưu thông báo');
-    echo '</form></div>';
+    $notice_content = get_option('gpt_error_notice_editor', '');
+    $messenger_link = get_option('gpt_messenger_link', 'https://m.me/700792956451509?ref=.f.2dfe2f2acdbb4fa281d6c5bd018478f0');
+    $logo_image_url = get_option('gpt_logo_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/Bimbosan_Logo_no-Claim-1024x267.png');
+    $messenger_icon_url = get_option('gpt_messenger_icon_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/logo-messenger.png');
+    $display_image_url = get_option('gpt_display_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/06/67b49d34db548cf82c4c01e5_cows.png');
+
+    
+    ?>
+    <div class="wrap">
+        <h1>Cấu hình thông báo</h1>
+        <div class="gpt-tich-diem-form">
+            <div class="messenger-status" style="padding: 10px; border-left: 4px solid #0073aa; background: #fff; margin-bottom: 20px;">
+                <strong>Link Messenger hiện tại:</strong>
+                <?php if (!empty($messenger_link)): ?>
+                    <br><a href="<?php echo esc_url($messenger_link); ?>" target="_blank" style="color: #00a32a; font-weight: bold;">
+                        <?php echo esc_url($messenger_link); ?>
+                    </a>
+                <?php else: ?>
+                    <span style="color: #d63638; font-weight: bold;">Chưa có link Messenger</span>
+                <?php endif; ?>
+            </div>
+            
+            <form method="post" action="">
+                <?php wp_nonce_field('save_notice_config', 'notice_config_nonce'); ?>
+                
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="messenger_link"><strong>Link Messenger:</strong></label>
+                    <input type="url" 
+                            id="messenger_link" 
+                            name="messenger_link" 
+                            value="<?php echo esc_attr($messenger_link); ?>" 
+                            placeholder="https://m.me/your-page-name" 
+                            class="large-text"
+                            style="width: 100%;">
+                    <p class="description">Nhập link Messenger của bạn (ví dụ: https://m.me/your-page-name)</p>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="gpt_error_notice_editor"><strong>Nội dung thông báo:</strong></label>
+                    <?php
+                    wp_editor($notice_content, 'gpt_error_notice_editor', [
+                        'textarea_name' => 'gpt_error_notice_editor',
+                        'media_buttons' => false,
+                        'textarea_rows' => 8,
+                        'tinymce' => true,
+                        'quicktags' => true
+                    ]);
+                    ?>
+                    <p class="description">Cấu hình nội dung thông báo sẽ hiển thị cho người dùng</p>
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="gpt_logo_image"><strong>Logo Website:</strong></label>
+                    <input type="file" name="gpt_logo_image" accept="image/*">
+                    <?php 
+                         if ($logo_image_url) {
+                            echo '<br><img src="' . esc_url($logo_image_url) . '" style="max-width: 200px; margin-top: 10px;" alt="Logo hiện tại">';
+                            echo '<p class="description">Logo hiện tại</p>';
+                        }
+                    ?>
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="gpt_messenger_icon"><strong>Icon Messenger:</strong></label>
+                    <input type="file" name="gpt_messenger_icon" accept="image/*">
+                    <?php 
+                        if ($messenger_icon_url) {
+                            echo '<br><img src="' . esc_url($messenger_icon_url) . '" style="max-width: 100px; margin-top: 10px;" alt="Icon messenger hiện tại">';
+                            echo '<p class="description">Icon messenger hiện tại</p>';
+                        }
+                    ?>
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="gpt_display_image"><strong>Ảnh Hiển Thị:</strong></label>
+                    <input type="file" name="gpt_display_image" accept="image/*">
+                    <?php 
+                        if ($display_image_url) {
+                            echo '<br><img src="' . esc_url($display_image_url) . '" style="max-width: 200px; margin-top: 10px;" alt="Ảnh hiển thị hiện tại">';
+                            echo '<p class="description">Ảnh hiển thị hiện tại</p>';
+                        }
+                    ?>
+                </div>
+                <div class="submit">
+                    <input type="submit" name="submit_notice_config" class="button-primary" value="💾 Lưu cấu hình thông báo">
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <style>
+    .gpt_form_wrap {
+        max-width: 800px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+    }
+    
+    .form-group input[type="url"] {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    .form-group input[type="url"]:focus {
+        border-color: #007cba;
+        outline: none;
+        box-shadow: 0 0 5px rgba(0, 124, 186, 0.3);
+    }
+    
+    .description {
+        color: #666;
+        font-style: italic;
+        margin-top: 5px;
+    }
+    </style>
+    
+    <script>
+    jQuery(document).ready(function($) {
+        $('#messenger_link').on('input', function() {
+            const link = $(this).val();
+            const previewDiv = $('.messenger-status');
+            
+            if (link.trim() !== '') {
+                previewDiv.html(
+                    '<strong>Link Messenger hiện tại:</strong><br>' +
+                    '<a href="' + link + '" target="_blank" style="color: #00a32a; font-weight: bold;">' + 
+                    link + 
+                    '</a>'
+                );
+            } else {
+                previewDiv.html(
+                    '<strong>Link Messenger hiện tại:</strong> ' +
+                    '<span style="color: #d63638; font-weight: bold;">Chưa có link Messenger</span>'
+                );
+            }
+        });
+    });
+    </script>
+    <?php
 }
 
 function gpt_register_notice_settings() {

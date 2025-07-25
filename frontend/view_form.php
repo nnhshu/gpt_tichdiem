@@ -216,33 +216,32 @@ function gpt_form_accumulate_code() {
     <?php if (!isset($client_id) || empty($client_id)): ?>
     <?php
         $notice = get_option('gpt_error_notice_editor');
+        $messenger_link = get_option('gpt_messenger_link', 'https://m.me/700792956451509?ref=.f.2dfe2f2acdbb4fa281d6c5bd018478f0');
+        $logo_image_url = get_option('gpt_logo_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/Bimbosan_Logo_no-Claim-1024x267.png');
+        $messenger_icon_url = get_option('gpt_messenger_icon_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/logo-messenger.png');
+        $display_image_url = get_option('gpt_display_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/06/67b49d34db548cf82c4c01e5_cows.png');
         ob_start();
     ?>
-        <?php  wp_enqueue_style('gpt-form-style', plugin_dir_url(__FILE__) . 'form.css'); ?>
-        <div class="gpt_error_mess">
-            <img src="<?php echo plugin_dir_url(__FILE__); ?>/image/facebook-messenger.png" />
-            <div>
-                <?php echo $notice; ?>
-            </div>
-        </div>
+        <?php  wp_enqueue_style('gpt-form-style', plugin_dir_url(__FILE__) . 'form.css'); ?>        
         <div class="div-chuyen-huong-mes">
             <div class="stars"></div>
             <div class="shooting-star"></div>
             <div class="glow"></div>
             <div class="content">
-                <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/Bimbosan_Logo_no-Claim-1024x267.png"
-                    class="logo" alt="Logo Bimbosan" />
-
+                <img src="<?php echo esc_url($logo_image_url); ?>"
+                    class="logo" alt="Logo Website" />
                 <div class="message" id="messageDb">
-                    ✨ Bạn đang ở bước cuối cùng!<br><br>
-                    Nhấn để bắt đầu tích điểm và nhận ưu đãi đổi quà 🎁
+                    <?php 
+                    $success_message = get_option('gpt_error_notice_editor', '✨ Bạn đang ở bước cuối cùng!<br><br>Nhấn để bắt đầu tích điểm và nhận ưu đãi đổi quà 🎁');
+                    echo wp_kses_post($success_message);
+                    ?>
                 </div>
                 <button class="btn" onclick="goToMessenger()" id="giftBtn">
-                    <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/logo-messenger.png"
+                    <img src="<?php echo esc_url($messenger_icon_url); ?>"
                         alt="Messenger" />
                     Nhấn để tích điểm
                 </button>
-                <img src="https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/06/67b49d34db548cf82c4c01e5_cows.png"
+                <img src="<?php echo esc_url($display_image_url); ?>"
                     alt="Cow surprise" class="cow-image" />
             </div>
             <div class="div-chat" onclick="goToMessenger()">
@@ -254,7 +253,7 @@ function gpt_form_accumulate_code() {
         </div>
         <script>
             function goToMessenger() {
-                window.location.href = `https://m.me/700792956451509?ref=.f.2dfe2f2acdbb4fa281d6c5bd018478f0`;
+                window.location.href = `<?php echo esc_js($messenger_link); ?>`;
             }
         </script>
         <?php

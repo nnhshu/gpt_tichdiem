@@ -3,20 +3,20 @@
 function register_import_check_post_type() {
     register_post_type('import_check', array(
         'labels' => array(
-            'name' => 'Đơn nhập thùng',
-            'singular_name' => 'Đơn nhập thùng',
-            'add_new' => 'Thêm đơn hàng nhập mới',
-            'add_new_item' => 'Thêm mới đơn hàng nhập',
-            'edit_item' => 'Chỉnh sửa đơn hàng nhập',
-            'new_item' => 'Thêm đơn hàng mới',
-            'view_item' => 'Xem mã định danh trong đơn hàng',
-            'search_items' => 'Tìm đơn hàng nhập',
+            'name' => 'Định danh thùng hàng',
+            'singular_name' => 'Danh sách thùng hàng',
+            'add_new' => 'Thêm thùng hàng',
+            'add_new_item' => 'Thêm thùng hàng',
+            'edit_item' => 'Chỉnh sửa thùng hàng',
+            'new_item' => 'Thêm thùng hàng',
+            'view_item' => 'Xem mã định danh trong thùng hàng',
+            'search_items' => 'Tìm thùng hàng',
             'not_found' => 'Không tìm thấy',
             'not_found_in_trash' => 'Không có trong thùng rác'
         ),
         'public' => true,
         'show_ui' => true,
-        'show_in_menu' => true,
+        'show_in_menu' => 'gpt-manager-tem',
         'supports' => array('title'),
         'has_archive' => true,
     ));
@@ -35,7 +35,7 @@ function gpt_render_import_check_tab() {
     $query = new WP_Query($args);
 
     echo '<div class="wrap">';
-    echo '<h2>📦 Danh sách nhập hàng</h2>';
+    echo '<h2>📦 Danh sách nhập thùng</h2>';
     echo '<p><a href="' . admin_url('post-new.php?post_type=import_check') . '" class="button button-primary">+ Thêm nhập hàng mới</a></p>';
 
     if ($query->have_posts()) {

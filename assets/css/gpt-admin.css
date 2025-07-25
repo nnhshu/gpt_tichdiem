@@ -968,14 +968,6 @@ input[type=week] {
     gap: 16px;
 }
 
-.wp-core-ui .button, 
-.wp-core-ui .button-primary, 
-.wp-core-ui .button-secondary {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
 .top10 table.widefat {
     width: 100%;
     border-collapse: collapse;

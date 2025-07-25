@@ -734,7 +734,7 @@ function gpt_create_code_batch() {
     $session = sanitize_text_field($_POST['session']);
     $batch_size = intval($_POST['batch_size']);
     $branch = get_option('gpt_branch', '');
-    $channel = sanitize_text_field($_POST['channel']);
+    // $channel = sanitize_text_field($_POST['channel']);
 
     $generated_codes = [];
     $count = 0;
@@ -779,7 +779,7 @@ function gpt_create_code_batch() {
             'point' => $point,
             'status' => 'pending',
             'province' => "",
-            'channel' => $channel,
+            'channel' => "",
             'product_id' => !empty($product_id) ? $product_id : '',
             'session' => $session,
             'qr_code_url' => $qr_code_url,

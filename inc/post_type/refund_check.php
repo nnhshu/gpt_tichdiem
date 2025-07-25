@@ -5,10 +5,10 @@ function register_refund_check_post_type() {
         'labels' => array(
             'name' => 'Đơn hoàn hàng',
             'singular_name' => 'Đơn hoàn hàng',
-            'add_new' => 'Thêm đơn hàng hoàn mới',
-            'add_new_item' => 'Thêm mới đơn hàng hoàn',
+            'add_new' => 'Thêm đơn hàng hoàn',
+            'add_new_item' => 'Thêm đơn hàng hoàn',
             'edit_item' => 'Chỉnh sửa đơn hàng hoàn',
-            'new_item' => 'Thêm đơn hàng mới',
+            'new_item' => 'Thêm đơn hàng hoàn ',
             'view_item' => 'Xem mã định danh trong đơn hàng',
             'search_items' => 'Tìm đơn hàng hoàn',
             'not_found' => 'Không tìm thấy',
@@ -16,7 +16,7 @@ function register_refund_check_post_type() {
         ),
         'public' => true,
         'show_ui' => true,
-        'show_in_menu' => true,
+        'show_in_menu' => 'gpt-manager-tem',
         'supports' => array('title'),
         'has_archive' => true,
     ));

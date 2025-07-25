@@ -198,3 +198,17 @@ function gpt_affiliate_setting_page() {
     </div>
     <?php
 }
+
+function gpt_setting_products_gift_page(){
+    ?>
+    <div class="gpt-tich-diem-form">
+        <?php 
+            if (function_exists('bizgpt_user_points_guide_display')) {
+                bizgpt_user_points_guide_display();
+            } else {
+                echo '<p>Function bizgpt_user_points_guide_display() chưa được định nghĩa.</p>';
+            }
+        ?>
+    </div>
+    <?php
+}
