@@ -8,6 +8,104 @@ add_action('admin_enqueue_scripts', function () {
     wp_enqueue_style('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css');
 });
 
+add_action('wp_ajax_gpt_get_customer_info', 'gpt_get_customer_info_callback');
+add_action('wp_ajax_nopriv_gpt_get_customer_info', 'gpt_get_customer_info_callback');
+
+function gpt_get_customer_info_callback() {
+    global $wpdb;
+    $table_name = BIZGPT_PLUGIN_WP_SAVE_USERS;
+    $logs_table = BIZGPT_PLUGIN_WP_LOGS;
+    $phone = sanitize_text_field($_POST['phone']);
+    
+    if (empty($phone)) {
+        wp_send_json(array(
+            'status' => 'error',
+            'message' => 'Số điện thoại không được để trống'
+        ));
+        return;
+    }
+    
+    if (!preg_match('/^[0-9]{10}$/', $phone)) {
+        wp_send_json(array(
+            'status' => 'error',  
+            'message' => 'Số điện thoại không hợp lệ'
+        ));
+        return;
+    }
+    
+    try {
+        $customer = $wpdb->get_row($wpdb->prepare(
+            "SELECT total_points, full_name, address FROM $table_name WHERE phone_number = %s",
+            $phone
+        ));
+        
+        if ($customer) {
+            $store_history = $wpdb->get_results($wpdb->prepare(
+                "SELECT DISTINCT store, address FROM $logs_table WHERE phone_number = %s AND store IS NOT NULL AND store != '' ORDER BY id DESC",
+                $phone
+            ));
+
+            $stores = array();
+            if ($store_history) {
+                foreach ($store_history as $log) {
+                    // Thêm store vào mảng
+                    if (!empty($log->store)) {
+                        $stores[] = array(
+                            'value' => $log->store,
+                            'label' => $log->store,
+                            'type' => 'store'
+                        );
+                    }
+                    
+                    // Thêm address vào mảng (nếu khác với store)
+                    if (!empty($log->address) && $log->address !== $log->store) {
+                        $stores[] = array(
+                            'value' => $log->address,
+                            'label' => $log->address,
+                            'type' => 'address'
+                        );
+                    }
+                }
+                
+                // Loại bỏ các giá trị trùng lặp dựa trên 'value'
+                $unique_stores = array();
+                $seen_values = array();
+                
+                foreach ($stores as $store) {
+                    if (!in_array($store['value'], $seen_values)) {
+                        $unique_stores[] = $store;
+                        $seen_values[] = $store['value'];
+                    }
+                }
+                
+                $stores = $unique_stores;
+            }
+            wp_send_json(array(
+                'status' => 'success',
+                'data' => array(
+                    'total_points' => (int)$customer->total_points,
+                    'fullname' => $customer->full_name,
+                    'address' => $customer->address,
+                    'stores' => $stores
+                )
+            ));
+        } else {
+            wp_send_json(array(
+                'status' => 'error',
+                'message' => 'Không tìm thấy khách hàng với số điện thoại này'
+            ));
+        }
+        
+    } catch (Exception $e) {
+        wp_send_json(array(
+            'status' => 'error',
+            'message' => 'Có lỗi xảy ra: ' . $e->getMessage()
+        ));
+    }
+    
+    wp_die();
+}
+
 
 // Hiển thị danh sách sản phẩm đổi quà
 function gpt_display_selected_products_shortcode() {
@@ -155,7 +253,8 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                 background: #000;
                 color: #fff;
             }
-            input#swal_phone {
+            input#swal_phone,
+            input.form-control {
                 width: 100%;
                 margin: 0;
                 margin-bottom: 16px;
@@ -171,33 +270,48 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                 margin-top: 16px;
                 color: #000;
             }
+            .form-group label {
+                text-align: left;
+            }
         </style>
         <!-- Include SweetAlert2 + Select2 CSS/JS -->
-        <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
-        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-        <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+        <!-- <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" /> -->
+        <!-- <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script> -->
+        <!-- <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script> -->
 
         <script>
             jQuery(document).ready(function($) {
                 $('.button-doidiem-qr').on('click', function(e) {
                     e.preventDefault();
-
+                    
                     let productId = $(this).data('id');
                     let productName = $(this).data('name');
                     let points = $(this).data('point');
                     let clientId = "<?php echo getClientIdFromUrlPage(); ?>";
-
-                    let selectHTML = '<select id="swal_store_select" style="width:100%"><option value="">Chọn chi nhánh</option>';
+                    
+                    let selectHTML = '<select id="swal_store_select" style="width:100%"><option value="">Vui lòng chọn địa chỉ nhận quà</option>';
                     GPT_STORE_LOCATIONS.forEach(store => {
                         selectHTML += `<option value="${store.value}">${store.label}</option>`;
                     });
                     selectHTML += '</select>';
-
+                    
                     Swal.fire({
                         title: `Bạn đang đổi điểm cho: ${productName}`,
                         html: `
-                            <input id="swal_phone" class="swal2-input" placeholder="Số điện thoại">
-                            ${selectHTML}
+                            <div class="change_points_container">
+                                <div class="form-group">
+                                    <label>Số điện thoại bạn dùng tích điểm:</label>
+                                    <input type="text" id="swal_phone" class="swal2-input" placeholder="Số điện thoại">
+                                </div>
+                                <div id="customer_info" style="margin-bottom: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px; display: none;">
+                                    <div id="customer_details"></div>
+                                </div>
+                                <div id="store_select_container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Chọn địa chỉ nhận quà:</label>
+                                    </div>
+                                </div>
+                            </div>
                         `,
                         showCancelButton: true,
                         confirmButtonText: 'Xác nhận',
@@ -207,11 +321,196 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                                 dropdownParent: $('.swal2-popup'),
                                 width: '100%'
                             });
+                            
+                            $('.swal2-confirm').prop('disabled', true).css({
+                                'opacity': '0.5',
+                                'cursor': 'not-allowed'
+                            });
+                            
+                            function updateStoreSelect(stores = null, show = false) {                                
+                                // Xóa nội dung cũ trước khi render mới
+                                $('#store_select_container .form-group').empty();
+                                
+                                if (!show) {
+                                    if (!stores) {
+                                        let inputHTML = `
+                                            <label for="swal_store_select">Nhập địa chỉ giao hàng:</label>
+                                            <input type="text" 
+                                                id="swal_store_select" 
+                                                class="form-control" 
+                                                style="width:100%; margin-top: 10px;" 
+                                                placeholder="Nhập địa chỉ của bạn...">
+                                        `;
+                                        
+                                        $('#store_select_container .form-group').append(inputHTML);
+                                        $('#store_select_container').show();
+                                        
+                                        // Thêm event listener cho input
+                                        $('#swal_store_select').on('input', function() {
+                                            updateButtonState();
+                                        });
+                                        
+                                        return;
+                                    } else {
+                                        // Ẩn select nếu show = false và có stores
+                                        $('#store_select_container').hide();
+                                        return;
+                                    }
+                                }
+                                
+                                // Kiểm tra nếu không có dữ liệu stores khi show = true
+                                if (!stores || stores.length === 0) {
+                                    $('#store_select_container').hide();
+                                    return;
+                                }
+                                
+                                // Tạo select dropdown khi có dữ liệu và show = true
+                                let newSelectHTML = `
+                                    <label for="swal_store_select">Chọn từ lịch sử:</label>
+                                    <select id="swal_store_select" style="width:100%; margin-top: 10px;">
+                                        <option value="">Chọn địa chỉ</option>
+                                `;
+                                
+                                // Hiển thị lịch sử store/address của khách hàng
+                                stores.forEach(item => {
+                                    const typeLabel = item.type === 'store' ? '[Cửa hàng]' : '[Địa chỉ]';
+                                    newSelectHTML += `<option value="${item.value}">${typeLabel} ${item.label}</option>`;
+                                });
+                                
+                                newSelectHTML += '</select>';
+                                
+                                // Cập nhật HTML, hiển thị container và khởi tạo lại select2
+                                $('#store_select_container .form-group').append(newSelectHTML);
+                                $('#store_select_container').show();
+                                $('#swal_store_select').select2({
+                                    dropdownParent: $('.swal2-popup'),
+                                    width: '100%'
+                                }).on('change', function() {
+                                    updateButtonState();
+                                });
+                            }
+                            
+                            // Khởi tạo select ban đầu
+                            updateStoreSelect(null, false);
+                            
+                            // Biến để track trạng thái khách hàng
+                            let customerFound = false;
+                            
+                            // Function để cập nhật trạng thái button
+                            function updateButtonState() {
+                                const phone = $('#swal_phone').val();
+                                const store = $('#swal_store_select').val();
+                                
+                                if (customerFound && /^[0-9]{10}$/.test(phone) && store) {
+                                    $('.swal2-confirm').prop('disabled', false).css({
+                                        'opacity': '1',
+                                        'cursor': 'pointer'
+                                    });
+                                } else {
+                                    $('.swal2-confirm').prop('disabled', true).css({
+                                        'opacity': '0.5',
+                                        'cursor': 'not-allowed'
+                                    });
+                                }
+                            }
+                            
+                            // Event listener cho select store
+                            $(document).on('change', '#swal_store_select', function() {
+                                updateButtonState();
+                            });
+                            
+                            // Thêm event listener cho input số điện thoại
+                            let phoneTimeout;
+                            $('#swal_phone').on('input', function() {
+                                const phone = $(this).val();
+                                customerFound = false;
+                                updateButtonState();
+                                
+                                // Clear timeout trước đó
+                                clearTimeout(phoneTimeout);
+                                
+                                // Ẩn thông tin khách hàng khi đang nhập
+                                $('#customer_info').hide();
+                                $('#customer_details').html('');
+                                updateStoreSelect(null, false);
+                                
+                                // Chỉ tìm kiếm khi số điện thoại có đủ 10 số
+                                if (/^[0-9]{10}$/.test(phone)) {
+                                    phoneTimeout = setTimeout(() => {
+                                        // Hiển thị loading
+                                        $('#customer_info').show();
+                                        $('#customer_details').html('<div style="text-align: center;"><i class="fa fa-spinner fa-spin"></i> Đang tìm kiếm thông tin khách hàng...</div>');
+                                        
+                                        // Gọi ajax để lấy thông tin khách hàng
+                                        $.ajax({
+                                            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                                            method: 'POST',
+                                            data: {
+                                                action: 'gpt_get_customer_info',
+                                                phone: phone
+                                            },
+                                            success: function(response) {
+                                                try {
+                                                    
+                                                    if (response.status === 'success') {
+                                                        customerFound = true;
+                                                        const customer = response.data;
+                                                        console.log(customer);
+                                                        $('#customer_details').html(`
+                                                            <div style="text-align: left;">
+                                                                <strong>Thông tin khách hàng:</strong>
+                                                                <div style="margin-top: 10px;">
+                                                                    <p>Họ tên: ${customer.fullname || 'Chưa cập nhật'}</p>
+                                                                    <p>Địa chỉ: ${customer.address || 'Chưa cập nhật'}</p> 
+                                                                    <p style="margin-bottom: 0px;">Điểm hiện có của bạn: <span style="color: #e74c3c; font-weight: bold;">${customer.total_points || 0} điểm</span></p> 
+                                                                </div>
+                                                            </div>
+                                                        `);
+                                                        if (customer.stores && customer.stores.length > 0) {
+                                                            updateStoreSelect(customer.stores, true);
+                                                        } else {
+                                                            $('#customer_details').append(`
+                                                                <div style="margin-top: 10px; padding: 8px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; color: #856404;">
+                                                                    <i class="fa fa-info-circle"></i> Khách hàng chưa có lịch sử giao dịch
+                                                                </div>
+                                                            `);
+                                                            updateStoreSelect(null, false);
+                                                        }
+                                                        updateButtonState();
+                                                    } else {
+                                                        $('#customer_details').html(`
+                                                            <div style="text-align: center; color: #e74c3c;">
+                                                                <i class="fa fa-exclamation-triangle"></i> ${data.message || 'Không tìm thấy thông tin khách hàng'}
+                                                            </div>
+                                                        `);
+                                                    }
+                                                    updateButtonState();
+                                                } catch (e) {
+                                                    $('#customer_details').html(`
+                                                        <div style="text-align: center; color: #e74c3c;">
+                                                            <i class="fa fa-exclamation-triangle"></i> Có lỗi xảy ra khi tải thông tin khách hàng
+                                                        </div>
+                                                    `);
+                                                    updateStoreSelect(null, false);
+                                                   
+                                                }
+                                            },
+                                            error: function() {
+                                                $('#customer_details').html(`
+                                                    <div style="text-align: center; color: #e74c3c;">
+                                                        <i class="fa fa-exclamation-triangle"></i> Không thể kết nối để lấy thông tin khách hàng
+                                                    </div>
+                                                `);
+                                            }
+                                        });
+                                    }, 500);
+                                }
+                            });
                         },
                         preConfirm: () => {
                             const phone = document.getElementById('swal_phone').value;
                             const store = document.getElementById('swal_store_select').value;
-
+                            
                             if (!/^[0-9]{10}$/.test(phone)) {
                                 Swal.showValidationMessage('Số điện thoại không hợp lệ');
                                 return false;
@@ -220,7 +519,7 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                                 Swal.showValidationMessage('Vui lòng chọn chi nhánh');
                                 return false;
                             }
-
+                            
                             return { phone, store };
                         }
                     }).then(result => {
@@ -242,7 +541,7 @@ function gpt_add_popup_redeem_gifts_html_to_footer() {
                                     if (data.status === 404) {
                                         Swal.fire('Thất bại', data.message, 'error');
                                     } else {
-                                        Swal.fire('Thành công', data.message, 'success');
+                                        Swal.fire(`Chúc mừng bạn đã nhận được phần quà ${productName}`, data.message, 'success');
                                     }
                                 }
                             });
@@ -263,8 +562,8 @@ add_action('wp_ajax_nopriv_gpt_save_exchange_gift', 'gpt_save_exchange_gift');
 function gpt_save_exchange_gift() {
     global $wpdb;
 
-    $table = BIZGPT_PLUGIN_WP_EXCHANGE_CODE_FOR_GIFT; // bảng gpt_doi_diem_barcode
-    $users_table = BIZGPT_PLUGIN_WP_SAVE_USERS;       // bảng gpt_list_users
+    $table = BIZGPT_PLUGIN_WP_EXCHANGE_CODE_FOR_GIFT;
+    $users_table = BIZGPT_PLUGIN_WP_SAVE_USERS;
 
     $phone     = sanitize_text_field($_POST['phone']);
     $store     = sanitize_text_field($_POST['storeName']);
@@ -275,7 +574,6 @@ function gpt_save_exchange_gift() {
     $user_name = is_user_logged_in() ? wp_get_current_user()->user_login : 'anonymous';
     $now       = current_time('mysql');
 
-    // 1. Kiểm tra user tồn tại
     $user = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM $users_table WHERE phone_number = %s LIMIT 1",
         $phone
@@ -289,6 +587,7 @@ function gpt_save_exchange_gift() {
     }
 
     $total_points = intval($user->total_points);
+    $current_redeemed_points = intval($user->redeemed_points);
 
     // 2. Kiểm tra đủ điểm không
     if ($total_points < $points) {
@@ -300,6 +599,7 @@ function gpt_save_exchange_gift() {
 
     // 3. Ghi vào bảng đổi điểm (status: pending)
     $remaining_points = $total_points - $points;
+    $new_redeemed_points = $current_redeemed_points + $points;
 
     $insert = $wpdb->insert($table, [
         'phone'            => $phone,
@@ -314,15 +614,31 @@ function gpt_save_exchange_gift() {
     ]);
 
     if ($insert) {
-        $wpdb->update(
+        $update_result = $wpdb->update(
             $users_table,
-            ['total_points' => $remaining_points],
+            [
+                'total_points' => $remaining_points,
+                'redeemed_points' => $new_redeemed_points
+            ],
             ['phone_number' => $phone]
         );
-        wp_send_json(json_encode([
-            'status' => 200,
-            'message' => 'Đã ghi nhận yêu cầu đổi điểm. Vui lòng chờ xác nhận.'
-        ]));
+
+        if ($update_result !== false) {
+            wp_send_json(json_encode([
+                'status' => 200,
+                'message' => 'Chúc mừng bạn đã đổi điểm thành công. Số điểm còn lại của bạn là: ' . $remaining_points . ' điểm'
+            ]));
+        } else {
+            $wpdb->delete($table, [
+                'phone' => $phone,
+                'time' => $now
+            ]);
+            
+            wp_send_json(json_encode([
+                'status' => 500,
+                'message' => 'Không thể cập nhật thông tin người dùng. Vui lòng thử lại.'
+            ]));
+        }
     } else {
         wp_send_json(json_encode([
             'status' => 500,

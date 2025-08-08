@@ -25,6 +25,7 @@ function gpt_render_duyet_barcode_page() {
     ?>
     
     <h1>Danh sách phiên cần duyệt</h1>
+    <hr>
     <div class="ux-row" style="margin-bottom: 16px;">
         <form method="get" class="row form-row" style="align-items: flex-end; width: 100%;">
             <div class="col large-2">
@@ -32,7 +33,7 @@ function gpt_render_duyet_barcode_page() {
                 <input type="date" name="filter_date" value="<?php echo esc_attr($selected_date); ?>">
             </div>
             <div class="col large-1">
-                <button type="submit" class="button primary">Lọc</button>
+                <button type="submit" class="button button-primary">Lọc</button>
             </div>
         </form>
     </div>
@@ -57,7 +58,7 @@ function gpt_render_duyet_barcode_page() {
                     echo esc_html($ngay);
                     ?>
                 </td>
-                <td>
+                <td class="btn-actions">
                     <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=view&session=' . urlencode($session->session)); ?>" class="button">Xem mã</a>
                     <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=approve&session=' . urlencode($session->session)); ?>" class="button button-primary">Duyệt tất cả</a>
                     <a href="<?php echo admin_url('admin.php?page=gpt-config-barcode&tab=browse&action=delete&session=' . urlencode($session->session)); ?>" class="button button-danger" onclick="return confirm(\'Bạn có chắc muốn xoá toàn bộ mã trong phiên này?\')">Xoá</a>
@@ -164,5 +165,22 @@ function gpt_render_duyet_barcode_page() {
         ));
 
         echo '<div class="notice notice-success is-dismissible"><p>✅ Đã duyệt ' . intval($updated) . ' mã trong phiên <code>' . esc_html($session) . '</code></p></div>';
+    }
+
+    if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['session'])) {
+        $session = sanitize_text_field($_GET['session']);
+        
+        $deleted = $wpdb->query($wpdb->prepare(
+            "DELETE FROM $table WHERE session = %s",
+            $session
+        ));
+
+        if ($deleted > 0) {
+            echo '<div class="notice notice-success is-dismissible"><p>✅ Đã xoá ' . $deleted . ' mã trong phiên <code>' . esc_html($session) . '</code></p></div>';
+            wp_redirect(admin_url('admin.php?page=gpt-config-barcode&tab=browse'));
+            exit;
+        } else {
+            echo '<div class="notice notice-warning is-dismissible"><p>❌ Không có mã nào để xoá trong phiên <code>' . esc_html($session) . '</code></p></div>';
+        }
     }
 }

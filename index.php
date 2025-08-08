@@ -27,10 +27,13 @@ define ('BIZGPT_PLUGIN_WP_EMPLOYEES', $wpdb->prefix . 'gpt_employees');
 define('BIZGPT_PLUGIN_WP_BOX_MANAGER', $wpdb->prefix . 'gpt_box_manager');
 define('BIZGPT_PLUGIN_WP_DISTRIBUTORS', $wpdb->prefix . 'gpt_distributors');
 define('BIZGPT_PLUGIN_WP_REFUND_ORDER', $wpdb->prefix . 'gpt_refund_order');
+define('BIZGPT_PLUGIN_WP_PRODUCT_LOT', $wpdb->prefix . 'gpt_lot_of_products');
 
 // Admin
 include plugin_dir_path(__FILE__) . 'inc/admin/index.php';
 include plugin_dir_path(__FILE__) . 'inc/database/sql.php';
+//Role
+include plugin_dir_path(__FILE__) . 'user_role.php';
 // Front end
 include plugin_dir_path(__FILE__) . 'inc/post_type/order_check.php';
 include plugin_dir_path(__FILE__) . 'inc/post_type/import_check.php';
@@ -55,11 +58,27 @@ add_action('admin_enqueue_scripts', function($hook) {
     }
 });
 
+function load_select2_assets() {
+    wp_enqueue_script('select2-js', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], null, true);
+    wp_enqueue_style('select2-css', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css');
+    wp_enqueue_script('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@11', [], null, true);
+    wp_enqueue_style('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css');
+}
+add_action('wp_enqueue_scripts', 'load_select2_assets');
+
 function getClientIdFromUrlPage() {
     if(isset($_GET['client_id'])) {
         return $_GET['client_id'];
     }
     return null;
+}
+
+function get_status_display_text($status) {
+    $status_map = [
+        'pending' => 'Chờ duyệt',
+        'completed' => 'Hoàn thành'
+    ];
+    return isset($status_map[$status]) ? $status_map[$status] : 'Chờ duyệt';
 }
 
 function get_or_create_user_points($phone_number, $user_data = []) {
@@ -418,8 +437,17 @@ function gpt_handle_barcode_tracking() {
     if (get_transient($ip_key)) {
         return;
     }
-    set_transient($ip_key, $barcode, HOUR_IN_SECONDS);
+
+    $barcode_status = gpt_check_barcode_status($barcode);
+    
+    if ($barcode_status == 'used') {
+        set_transient($ip_key, '', 5 * MINUTE_IN_SECONDS);
+        $current_barcode = gpt_get_saved_barcode();
+    } else {
+        set_transient($ip_key, $barcode, 5 * MINUTE_IN_SECONDS);
+    }
 }
+
 add_action('template_redirect', 'gpt_handle_barcode_tracking');
 
 function gpt_get_user_ip() {
@@ -430,6 +458,39 @@ function gpt_get_user_ip() {
     } else {
         return $_SERVER['REMOTE_ADDR'];
     }
+}
+
+function gpt_check_barcode_status($barcode) {
+    global $wpdb;
+    
+    $table_name = BIZGPT_PLUGIN_WP_BARCODE;
+    
+    $status = $wpdb->get_var($wpdb->prepare(
+        "SELECT status FROM {$table_name} WHERE barcode = %s",
+        $barcode
+    ));
+    
+    return $status ? $status : 'not_found';
+}
+
+function gpt_get_saved_barcode() {
+    $ip = gpt_get_user_ip();
+    $ip_key = 'gpt_barcode_' . md5($ip);
+    
+    $saved_barcode = get_transient($ip_key);
+    
+    if ($saved_barcode === '') {
+        return false;
+    }
+    
+    return $saved_barcode;
+}
+
+function gpt_clear_barcode_transient() {
+    $ip = gpt_get_user_ip();
+    $ip_key = 'gpt_barcode_' . md5($ip);
+    
+    delete_transient($ip_key);
 }
 
 

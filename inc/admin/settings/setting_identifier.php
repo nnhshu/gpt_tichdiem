@@ -175,7 +175,7 @@ function gpt_setting_identifier_page() {
                 </form>
                 <div id="gpt_progress_wrap" style="margin-top:20px; display:none;">
                     <div style="background: #f1f1f1; height: 20px; border-radius: 10px; overflow: hidden;">
-                        <div id="gpt_progress_bar" style="width:0%; height: 100%; background: #0073aa; transition: width 0.3s ease;"></div>
+                        <div id="gpt_progress_bar" style="width:0%; height: 100%; background: linear-gradient(90deg, rgb(3, 219, 238) 0%, rgb(69, 165, 246) 50%, rgb(124, 119, 254) 100%); transition: width 0.3s;"></div>
                     </div>
                 </div>
                 <div id="gpt_result" style="margin-top:15px;"></div>

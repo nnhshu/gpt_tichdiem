@@ -234,16 +234,32 @@ function gpt_shortcode_lookup_store_aff() {
     <div class="gpt-lookup-form-container">
         <h3 style="text-align: center;">Tra cứu thông tin tích điểm của cửa hàng</h3>
         <div id="lookup-store-form">
-            <label for="store_id">Chọn cửa hàng:</label>
-            <select id="store_id" name="store_id" class="gpt-select2" required>
-                <option value="">-- Chọn cửa hàng --</option>
-                <?php foreach ($stores as $store): ?>
-                <option value="<?= esc_attr($store->id) ?>">
-                    <?= esc_html($store->store_name) ?>
-                </option>
-                <?php endforeach; ?>
-            </select>
-            <button class="button button-primary">Tra cứu</button>
+            <div class="form-row">
+                <label for="store_id">Chọn cửa hàng:</label>
+                <select id="store_id_loopup" name="store_id" class="gpt-select2" required>
+                    <option value="">-- Chọn cửa hàng --</option>
+                    <?php foreach ($stores as $store): ?>
+                    <option value="<?= esc_attr($store->id) ?>">
+                        <?= esc_html($store->store_name) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <div class="form-row">
+                <label for="store_phone">Số điện thoại cửa hàng:</label>
+                <input type="tel" id="store_phone" name="store_phone" placeholder="Nhập số điện thoại cửa hàng" required>
+            </div>
+            
+            <div class="form-row">
+                <label for="captcha">Nhập vào kết quả của phép tính: <span id="captcha-question"></span></label>
+                <div class="captcha-wrapper">
+                    <input type="number" id="store_captcha_answer" name="store_captcha_answer" placeholder="Nhập kết quả" required>
+                    <button type="button" id="refresh-captcha" class="refresh-btn">🔄</button>
+                </div>
+            </div>
+            
+            <button type="submit" class="button button-primary" id="lookup-submit-btn">Tra cứu</button>
         </div>
     </div>
     <div id="gpt-loading-wrapper" style="display:none;">
@@ -255,107 +271,236 @@ function gpt_shortcode_lookup_store_aff() {
     <div id="gpt_store_result"></div>
 </div>
 <style>
-
-.gpt-loading-center {
-    text-align: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    margin-top: 16px;
-}
-.loading-text {
-    margin-bottom: 0px;
-    color: #000;
-}
-.lds-dual-ring {
-    display: inline-block;
-    width: 40px;
-    height: 40px;
-}
-
-.lds-dual-ring:after {
-    content: " ";
-    display: block;
-    width: 32px;
-    height: 32px;
-    margin: 4px;
-    border-radius: 50%;
-    border: 4px solid var(--fs-color-primary);
-    border-color: var(--fs-color-primary) transparent var(--fs-color-primary) transparent;
-    animation: lds-dual-ring 1.2s linear infinite;
-}
-
-@keyframes lds-dual-ring {
-    0% {
-        transform: rotate(0deg);
+    .form-row {
+        margin-bottom: 15px;
+        width: 100%;
     }
 
-    100% {
-        transform: rotate(360deg);
+    .form-row .select2-container{
+        margin-bottom: 0px;
     }
-}
+
+    .form-row label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+
+    .form-row input, 
+    .form-row select {
+        width: 100%;
+        padding: 14px 16px;
+        border: 1px solid #cccccc;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.3s, box-shadow 0.3s;
+        min-height: 50px;
+        margin-bottom: 0px;
+        box-shadow: none;
+    }
+
+    .captcha-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .captcha-wrapper span {
+        font-weight: bold;
+        font-size: 16px;
+        color: #333;
+        min-width: 80px;
+    }
+
+    .captcha-wrapper input {
+        width: 95%;
+        margin: 0;
+    }
+
+    .refresh-btn {
+        background: #f0f0f0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 14px;
+        margin: 0px;
+    }
+
+    .refresh-btn:hover {
+        background: #e0e0e0;
+    }
+
+    .error-message {
+        color: #d63638;
+        font-size: 14px;
+        margin-top: 5px;
+    }
+
+    .gpt-loading-center {
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        margin-top: 16px;
+    }
+
+    .loading-text {
+        margin-bottom: 0px;
+        color: #000;
+    }
+
+    .lds-dual-ring {
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+    }
+
+    .lds-dual-ring:after {
+        content: " ";
+        display: block;
+        width: 32px;
+        height: 32px;
+        margin: 4px;
+        border-radius: 50%;
+        border: 4px solid var(--fs-color-primary);
+        border-color: var(--fs-color-primary) transparent var(--fs-color-primary) transparent;
+        animation: lds-dual-ring 1.2s linear infinite;
+    }
+
+    @keyframes lds-dual-ring {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
 </style>
 <script>
 jQuery(document).ready(function($) {
-
+    let captchaAnswer = 0;
+    
+    // Tạo captcha mới
+    function generateCaptcha() {
+        let num1 = Math.floor(Math.random() * 20) + 1;
+        let num2 = Math.floor(Math.random() * 20) + 1;
+        captchaAnswer = num1 + num2;
+        $('#captcha-question').text(num1 + ' + ' + num2 + ' = ?');
+        $('#store_captcha_answer').val('');
+    }
+    
+    // Khởi tạo
     $('#gpt_store_result').hide();
-    $('#lookup-store-form #store_id').select2({
+    $('#lookup-store-form #store_id_loopup').select2({
         placeholder: 'Chọn cửa hàng...',
         minimumInputLength: 1
     });
+    generateCaptcha();
+    
+    // Refresh captcha
+    $(document).on('click', '#refresh-captcha', function() {
+        generateCaptcha();
+    });
 
-    $('#lookup-store-form button').on('click', function(e) {
-
+    // Xử lý form submit
+    $(document).on('click', '#lookup-store-form .button', function(e) {
         e.preventDefault();
-        let store_id = $('#lookup-store-form #store_id').val();
-
-        if (store_id) {
-            $('#gpt_store_result').hide().html('');
-            $('#gpt-loading-wrapper').show();
-            $.post('<?php echo admin_url('admin-ajax.php'); ?>', {
-                action: 'gpt_get_store_point_aff',
-                store_id: store_id
-            }, function(res) {
-                $('#gpt-loading-wrapper').hide();
-                if (res.success) {
-                    let html = `<h4>Cửa hàng: <strong>${res.data.name}</strong></h4>
-                                        <p>🎯 Tổng điểm: <strong>${res.data.total_points}</strong></p>`;
-                    if (res.data.logs.length > 0) {
-                        html += `<table class="gpt-log-table">
-                                <thead>
-                                    <tr>
-                                        <th>Ngày</th>
-                                        <th>Họ và tên</th>
-                                        <th>Số điện thoại</th>
-                                        <th>Mã định danh</th>
-                                        <th>Sản phẩm</th>
-                                        <th>Điểm</th>
-                                    </tr>
-                                </thead>
-                                <tbody>`;
-                        res.data.logs.forEach(log => {
-                            html += `<tr>
-                                    <td>${log.created_at}</td>
-                                    <td>${log.customer_name}</td>
-                                    <td>${log.phone_number}</td>
-                                    <td>${log.barcode}</td>
-                                    <td>${log.product}</td>
-                                    <td>${log.point_change}</td>
-                                </tr>`;
-                        });
-                        html += `</tbody></table>`;
-                    } else {
-                        html += `<p>📭 Không có lịch sử tích điểm nào.</p>`;
-                    }
-                    $('#gpt_store_result').show();
-                    $('#gpt_store_result').html(html);
-                } else {
-                    $('#gpt_store_result').html(
-                        '<p style="color:red">❌ Không tìm thấy thông tin cửa hàng.</p>');
-                }
-            });
+        
+        // Xóa các thông báo lỗi cũ
+        $('.error-message').remove();
+        
+        let store_id = $('#lookup-store-form #store_id_loopup').val();
+        let store_phone = $('#store_phone').val().trim();
+        let user_answer = parseInt($('#store_captcha_answer').val());
+        
+        let hasError = false;
+        
+        // Validate form
+        if (!store_id) {
+            $('#store_id_loopup').after('<div class="error-message">Vui lòng chọn cửa hàng</div>');
+            hasError = true;
         }
+        
+        if (!store_phone) {
+            $('#store_phone').after('<div class="error-message">Vui lòng nhập số điện thoại cửa hàng</div>');
+            hasError = true;
+        } else if (!/^[0-9]{10,11}$/.test(store_phone)) {
+            $('#store_phone').after('<div class="error-message">Số điện thoại không hợp lệ (10-11 số)</div>');
+            hasError = true;
+        }
+        
+        if (isNaN(user_answer) || user_answer !== captchaAnswer) {
+            $('#store_captcha_answer').after('<div class="error-message">Mã xác thực không đúng</div>');
+            hasError = true;
+        }
+        
+        if (hasError) {
+            return;
+        }
+
+        // Gửi request
+        $('#gpt_store_result').hide().html('');
+        $('#gpt-loading-wrapper').show();
+        
+        $.post('<?php echo admin_url('admin-ajax.php'); ?>', {
+            action: 'gpt_get_store_point_aff',
+            store_id: store_id,
+            store_phone: store_phone
+        }, function(res) {
+            $('#gpt-loading-wrapper').hide();
+            if (res.success) {
+                let html = `<h4>Cửa hàng: <strong>${res.data.name}</strong></h4>
+                                    <p>📞 Số điện thoại: <strong>${store_phone}</strong></p>
+                                    <p>🎯 Tổng điểm: <strong>${res.data.total_points}</strong></p>`;
+                if (res.data.logs.length > 0) {
+                    html += `<table class="gpt-log-table">
+                            <thead>
+                                <tr>
+                                    <th>Ngày</th>
+                                    <th>Họ và tên</th>
+                                    <th>Số điện thoại</th>
+                                    <th>Mã định danh</th>
+                                    <th>Sản phẩm</th>
+                                    <th>Điểm</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                    res.data.logs.forEach(log => {
+                        html += `<tr>
+                                <td>${log.created_at}</td>
+                                <td>${log.customer_name}</td>
+                                <td>${log.phone_number}</td>
+                                <td>${log.barcode}</td>
+                                <td>${log.product}</td>
+                                <td>${log.point_change}</td>
+                            </tr>`;
+                    });
+                    html += `</tbody></table>`;
+                } else {
+                    html += `<p>📭 Không có lịch sử tích điểm nào.</p>`;
+                }
+                $('#gpt_store_result').show();
+                $('#gpt_store_result').html(html);
+                
+                // Tạo captcha mới sau khi thành công
+                generateCaptcha();
+            } else {
+                $('#gpt_store_result').html(
+                    '<p style="color:red">❌ ' + (res.data.message || 'Không tìm thấy thông tin cửa hàng.') + '</p>');
+                $('#gpt_store_result').show();
+                
+                // Tạo captcha mới sau khi thất bại
+                generateCaptcha();
+            }
+        }).fail(function() {
+            $('#gpt-loading-wrapper').hide();
+            $('#gpt_store_result').html(
+                '<p style="color:red">❌ Có lỗi xảy ra. Vui lòng thử lại.</p>');
+            $('#gpt_store_result').show();
+            generateCaptcha();
+        });
     });
 });
 </script>
@@ -370,40 +515,80 @@ function gpt_get_store_point_aff() {
     global $wpdb;
 
     $store_id = intval($_POST['store_id']);
+    $store_phone = sanitize_text_field($_POST['store_phone']);
+    
     $table = BIZGPT_PLUGIN_WP_STORE_LIST;
     $table_logs = BIZGPT_PLUGIN_WP_LOGS;
 
-
-    $store = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $store_id));
-    if (!$store) {
-        wp_send_json_error('Không tìm thấy cửa hàng.');
+    // Validate input
+    if (empty($store_id)) {
+        wp_send_json_error(['message' => 'Vui lòng chọn cửa hàng.']);
+        return;
     }
 
+    if (empty($store_phone)) {
+        wp_send_json_error(['message' => 'Vui lòng nhập số điện thoại cửa hàng.']);
+        return;
+    }
+
+    // Validate phone format
+    if (!preg_match('/^[0-9]{10,11}$/', $store_phone)) {
+        wp_send_json_error(['message' => 'Số điện thoại không hợp lệ (phải có 10-11 chữ số).']);
+        return;
+    }
+
+    // Get store info
+    $store = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $store_id));
+    if (!$store) {
+        wp_send_json_error(['message' => 'Không tìm thấy cửa hàng.']);
+        return;
+    }
+
+    // Verify store phone (assuming store table has phone_number field)
+    // If you want to verify store phone matches database, uncomment below:
+    /*
+    if (isset($store->phone_number) && $store->phone_number !== $store_phone) {
+        wp_send_json_error(['message' => 'Số điện thoại cửa hàng không đúng.']);
+        return;
+    }
+    */
+
+    // Get total points for this store
     $total = $wpdb->get_var($wpdb->prepare(
-        "SELECT SUM(point_change) FROM $table_logs WHERE aff_by_store_id = %d AND transaction_type = 'tich_diem'", $store->id
+        "SELECT IFNULL(SUM(point_change), 0) FROM $table_logs WHERE aff_by_store_id = %d AND transaction_type = 'tich_diem'", 
+        $store->id
     ));
 
+    // Get transaction logs for this store
     $logs = $wpdb->get_results($wpdb->prepare(
-        "SELECT customer_name, phone_number, barcode, product, point_change, barcode_status, created_at FROM $table_logs 
-        WHERE aff_by_store_id = %d ORDER BY created_at DESC LIMIT 100", $store->id
+        "SELECT customer_name, phone_number, barcode, product_name as product, point_change, barcode_status, created_at 
+         FROM $table_logs 
+         WHERE aff_by_store_id = %d AND transaction_type = 'tich_diem'
+         ORDER BY created_at DESC 
+         LIMIT 100", 
+        $store->id
     ));
 
+    // Format logs data
     $formatted_logs = array_map(function($row) {
         return [
-            'created_at'       => date('d/m/Y', strtotime($row->created_at)),
-            'barcode'     => esc_html($row->barcode),
-            'product'   => esc_html($row->product),
-            'point_change'       => intval($row->point_change),
-            'phone_number' => esc_html(gpt_mask_phone_number($row->phone_number)),
-            'customer_name' => esc_html($row->customer_name),
+            'created_at'    => date('d/m/Y H:i', strtotime($row->created_at)),
+            'barcode'       => esc_html($row->barcode ?? ''),
+            'product'       => esc_html($row->product ?? ''),
+            'point_change'  => intval($row->point_change),
+            'phone_number'  => esc_html(gpt_mask_phone_number($row->phone_number)),
+            'customer_name' => esc_html($row->customer_name ?? ''),
         ];
     }, $logs);
 
     wp_send_json_success([
-        'name'         => $store->store_name,
+        'name'         => esc_html($store->store_name),
+        'phone'        => esc_html($store_phone),
         'total_points' => intval($total),
         'logs'         => $formatted_logs,
     ]);
+
+    wp_die();
 }
 
 // Tra cứu tích điểm
@@ -413,206 +598,206 @@ add_shortcode('gpt_lookup_point_of_user', 'gpt_lookup_point_of_user_shortcode');
 function gpt_lookup_point_of_user_shortcode() {
     ob_start();
     ?>
-<?php  wp_enqueue_style('gpt-form-style-look', plugin_dir_url(__FILE__) . 'lookup.css'); ?>
-<div class="gpt_lookup_point_wrap">
-    <div class="bizgpt_form_content">
-        <h3 style="text-align: center;">Tra cứu thông tin tích điểm</h3>
-        <form id="gpt_lookup_point_form" class="space-y-3">
-            <input type="text" id="lookup_phone" placeholder="Nhập số điện thoại" required>
+    <?php  wp_enqueue_style('gpt-form-style-look', plugin_dir_url(__FILE__) . 'lookup.css'); ?>
+    <div class="gpt_lookup_point_wrap">
+        <div class="bizgpt_form_content">
+            <h3 style="text-align: center;">Tra cứu thông tin tích điểm</h3>
+            <form id="gpt_lookup_point_form" class="space-y-3">
+                <input type="text" id="lookup_phone" placeholder="Nhập số điện thoại" required>
 
-            <div style="margin-top: 10px;">
-                <label>
-                    Nhập vào kết quả của phép tính:
-                    <span id="captcha_question"></span>
-                </label>
-                <input type="text" id="captcha_answer" placeholder="Nhập kết quả" required>
-            </div>
+                <div style="margin-top: 10px;">
+                    <label>
+                        Nhập vào kết quả của phép tính:
+                        <span id="captcha_question"></span>
+                    </label>
+                    <input type="text" id="captcha_answer" placeholder="Nhập kết quả" required>
+                </div>
 
-            <button type="submit" class="btn-gradient">Tra cứu</button>
-        </form>
+                <button type="submit" class="btn-gradient">Tra cứu</button>
+            </form>
+        </div>
+        <div id="search_result"></div>
     </div>
-    <div id="search_result"></div>
-</div>
 
-<script>
-jQuery(document).ready(function($) {
+    <script>
+        jQuery(document).ready(function($) {
 
-    function generateCaptcha() {
-        let num1 = Math.floor(Math.random() * 10) + 1;
-        let num2 = Math.floor(Math.random() * 10) + 1;
-        $('#captcha_question').text(`${num1} + ${num2} = ?`);
-        return num1 + num2;
-    }
-
-    let captcha_result = generateCaptcha();
-
-    let currentPageTich = 1;
-    let currentPageDoi = 1;
-    let perPage = 5;
-
-    $('#gpt_lookup_point_form').on('submit', function(e) {
-        e.preventDefault();
-
-        let phone = $('#lookup_phone').val().trim();
-        let captcha = $('#captcha_answer').val().trim();
-
-        if (phone === '') {
-            alert('Vui lòng nhập số điện thoại!');
-            return;
-        }
-
-        if (!isValidVietnamPhone(phone)) {
-            alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng số điện thoại Việt Nam.');
-            return;
-        }
-
-        if (parseInt(captcha) !== captcha_result) {
-            alert('Mã captcha không đúng!');
-            return;
-        }
-
-        $('#search_result').html('<p>🔄 Đang tra cứu, vui lòng đợi...</p>');
-
-        fetchHistory(phone, currentPageTich, currentPageDoi);
-    });
-
-    function fetchHistory(phone, page) {
-        let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-
-        $.post(ajaxurl, {
-            action: 'gpt_lookup_point_ajax',
-            phone: phone,
-            page: page,
-            per_page: perPage
-        }, function(response) {
-            if (response.success) {
-                let data = response.data;
-                renderResult(phone, data);
-
-                captcha_result = generateCaptcha();
-                $('#captcha_answer').val('');
-
-            } else {
-                $('#search_result').html(`<p style="color:red;">${response.data}</p>`);
-                captcha_result = generateCaptcha();
-                $('#captcha_answer').val('');
+            function generateCaptcha() {
+                let num1 = Math.floor(Math.random() * 10) + 1;
+                let num2 = Math.floor(Math.random() * 10) + 1;
+                $('#captcha_question').text(`${num1} + ${num2} = ?`);
+                return num1 + num2;
             }
-        });
-    }
 
-    function fetchHistory(phone, pageTich, pageDoi) {
-        let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+            let captcha_result = generateCaptcha();
 
-        $.post(ajaxurl, {
-            action: 'gpt_lookup_point_ajax',
-            phone: phone,
-            page_tich: pageTich,
-            page_doi: pageDoi,
-            per_page: perPage
-        }, function(response) {
-            if (response.success) {
-                let data = response.data;
-                renderResult(phone, data);
+            let currentPageTich = 1;
+            let currentPageDoi = 1;
+            let perPage = 5;
 
-                captcha_result = generateCaptcha();
-                $('#captcha_answer').val('');
-            } else {
-                $('#search_result').html(`<p style="color:red;">${response.data}</p>`);
-                captcha_result = generateCaptcha();
-                $('#captcha_answer').val('');
+            $('#gpt_lookup_point_form').on('submit', function(e) {
+                e.preventDefault();
+
+                let phone = $('#lookup_phone').val().trim();
+                let captcha = $('#captcha_answer').val().trim();
+
+                if (phone === '') {
+                    alert('Vui lòng nhập số điện thoại!');
+                    return;
+                }
+
+                if (!isValidVietnamPhone(phone)) {
+                    alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng số điện thoại Việt Nam.');
+                    return;
+                }
+
+                if (parseInt(captcha) !== captcha_result) {
+                    alert('Mã captcha không đúng!');
+                    return;
+                }
+
+                $('#search_result').html('<p>🔄 Đang tra cứu, vui lòng đợi...</p>');
+
+                fetchHistory(phone, currentPageTich, currentPageDoi);
+            });
+
+            function fetchHistory(phone, page) {
+                let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+
+                $.post(ajaxurl, {
+                    action: 'gpt_lookup_point_ajax',
+                    phone: phone,
+                    page: page,
+                    per_page: perPage
+                }, function(response) {
+                    if (response.success) {
+                        let data = response.data;
+                        renderResult(phone, data);
+
+                        captcha_result = generateCaptcha();
+                        $('#captcha_answer').val('');
+
+                    } else {
+                        $('#search_result').html(`<p style="color:red;">${response.data}</p>`);
+                        captcha_result = generateCaptcha();
+                        $('#captcha_answer').val('');
+                    }
+                });
             }
-        });
-    }
 
-    function renderResult(phone, data) {
-        let html = `
-                <div class="flex align-middle box_info">
-                    <div><span>📱 Số điện thoại:</span> <strong>${phone}</strong></div>
-                    <div><span>✅ Đã tích:</span> <strong>${data.diem_tich} điểm</strong></div>
-                    <div><span>🔁 Đã đổi:</span> <strong>${data.diem_doi} điểm</strong></div>
-                    <div><span>⭐ Điểm hiện có:</span> <strong>${data.diem_con_lai} điểm</strong></div>
-                </div>
-                <div style="margin-top: 20px; text-align: left;">
-                    <h4>Lịch sử Tích điểm:</h4>
-                    ${renderTable(data.lich_su_tich)}
-                    <div id="pagination_tich" style="margin-top: 10px; text-align: center;">
-                        ${data.total_pages_tich > 1 ? renderPagination(data.total_pages_tich, data.current_page_tich, 'tich') : ''}
-                    </div>
-                </div>
+            function fetchHistory(phone, pageTich, pageDoi) {
+                let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
 
-                <div style="margin-top: 30px; text-align: left;">
-                    <h4>Lịch sử Đổi điểm:</h4>
-                    ${renderTable(data.lich_su_doi)}
-                    <div id="pagination_doi" style="margin-top: 10px; text-align: center;">
-                        ${data.total_pages_doi > 1 ? renderPagination(data.total_pages_doi, data.current_page_doi, 'doi') : ''}
-                    </div>
-                </div>
-            `;
+                $.post(ajaxurl, {
+                    action: 'gpt_lookup_point_ajax',
+                    phone: phone,
+                    page_tich: pageTich,
+                    page_doi: pageDoi,
+                    per_page: perPage
+                }, function(response) {
+                    if (response.success) {
+                        let data = response.data;
+                        renderResult(phone, data);
 
-        $('#search_result').html(html);
-
-        $('.pagination-link').on('click', function() {
-            let type = $(this).data('type');
-            let page = parseInt($(this).data('page'));
-            if (type === 'tich') {
-                currentPageTich = page;
-            } else if (type === 'doi') {
-                currentPageDoi = page;
+                        captcha_result = generateCaptcha();
+                        $('#captcha_answer').val('');
+                    } else {
+                        $('#search_result').html(`<p style="color:red;">${response.data}</p>`);
+                        captcha_result = generateCaptcha();
+                        $('#captcha_answer').val('');
+                    }
+                });
             }
-            fetchHistory(phone, currentPageTich, currentPageDoi);
-        });
-    }
 
-    function renderTable(list) {
-        if (list.length === 0) {
-            return '<p>Không có dữ liệu.</p>';
-        }
+            function renderResult(phone, data) {
+                let html = `
+                        <div class="flex align-middle box_info">
+                            <div><span>📱 Số điện thoại:</span> <strong>${phone}</strong></div>
+                            <div><span>✅ Tổng điểm của bạn:</span> <strong>${data.tong_diem} điểm</strong></div>
+                            <div><span>🔁 Đã đổi:</span> <strong>${data.diem_doi} điểm</strong></div>
+                            <div><span>⭐ Điểm hiện có:</span> <strong>${data.diem_tich} điểm</strong></div>
+                        </div>
+                        <div style="margin-top: 20px; text-align: left;">
+                            <h4>Lịch sử Tích điểm:</h4>
+                            ${renderTable(data.lich_su_tich)}
+                            <div id="pagination_tich" style="margin-top: 10px; text-align: center;">
+                                ${data.total_pages_tich > 1 ? renderPagination(data.total_pages_tich, data.current_page_tich, 'tich') : ''}
+                            </div>
+                        </div>
 
-        return `
-                        <div class="overflow-x-auto">
-                            <table class="table bordered" style="width:100%; border-collapse: collapse;" border="1">
-                                <thead>
-                                    <tr>
-                                        <th style="padding: 8px;">Loại giao dịch</th>
-                                        <th style="padding: 8px;">Số điểm</th>
-                                        <th style="padding: 8px;">Sản phẩm</th>
-                                        <th style="padding: 8px;">Thời gian</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${list.map(item => `
-                                        <tr>
-                                            <td style="padding: 8px;">${item.loai_giao_dich}</td>
-                                            <td style="padding: 8px;">${item.so_diem}</td>
-                                            <td style="padding: 8px;">${item.product}</td>
-                                            <td style="padding: 8px;">${item.created_at}</td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
+                        <div style="margin-top: 30px; text-align: left;">
+                            <h4>Lịch sử Đổi điểm:</h4>
+                            ${renderTable(data.lich_su_doi)}
+                            <div id="pagination_doi" style="margin-top: 10px; text-align: center;">
+                                ${data.total_pages_doi > 1 ? renderPagination(data.total_pages_doi, data.current_page_doi, 'doi') : ''}
+                            </div>
                         </div>
                     `;
-    }
 
-    function renderPagination(totalPages, currentPage, type) {
-        let html = '';
-        for (let i = 1; i <= totalPages; i++) {
-            if (i === currentPage) {
-                html += `<span style="margin: 0 5px; font-weight: bold;">${i}</span>`;
-            } else {
-                html +=
-                    `<a href="javascript:void(0);" class="pagination-link" data-page="${i}" data-type="${type}" style="margin: 0 5px;">${i}</a>`;
+                $('#search_result').html(html);
+
+                $('.pagination-link').on('click', function() {
+                    let type = $(this).data('type');
+                    let page = parseInt($(this).data('page'));
+                    if (type === 'tich') {
+                        currentPageTich = page;
+                    } else if (type === 'doi') {
+                        currentPageDoi = page;
+                    }
+                    fetchHistory(phone, currentPageTich, currentPageDoi);
+                });
             }
-        }
-        return html;
-    }
 
-    function isValidVietnamPhone(phone) {
-        let regex = /^(0|\+84)(3[2-9]|5[6|8|9]|7[0|6-9]|8[1-5]|9[0-9])[0-9]{7}$/;
-        return regex.test(phone);
-    }
-});
-</script>
+            function renderTable(list) {
+                if (list.length === 0) {
+                    return '<p>Không có dữ liệu.</p>';
+                }
+
+                return `
+                                <div class="overflow-x-auto">
+                                    <table class="table bordered" style="width:100%; border-collapse: collapse;" border="1">
+                                        <thead>
+                                            <tr>
+                                                <th style="padding: 8px;">Loại giao dịch</th>
+                                                <th style="padding: 8px;">Số điểm</th>
+                                                <th style="padding: 8px;">Sản phẩm</th>
+                                                <th style="padding: 8px;">Thời gian</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${list.map(item => `
+                                                <tr>
+                                                    <td style="padding: 8px;">${item.loai_giao_dich}</td>
+                                                    <td style="padding: 8px;">${item.so_diem}</td>
+                                                    <td style="padding: 8px;">${item.product}</td>
+                                                    <td style="padding: 8px;">${item.created_at}</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+            }
+
+            function renderPagination(totalPages, currentPage, type) {
+                let html = '';
+                for (let i = 1; i <= totalPages; i++) {
+                    if (i === currentPage) {
+                        html += `<span style="margin: 0 5px; font-weight: bold;">${i}</span>`;
+                    } else {
+                        html +=
+                            `<a href="javascript:void(0);" class="pagination-link" data-page="${i}" data-type="${type}" style="margin: 0 5px;">${i}</a>`;
+                    }
+                }
+                return html;
+            }
+
+            function isValidVietnamPhone(phone) {
+                let regex = /^(0|\+84)(3[2-9]|5[6|8|9]|7[0|6-9]|8[1-5]|9[0-9])[0-9]{7}$/;
+                return regex.test(phone);
+            }
+        });
+    </script>
 <?php
     return ob_get_clean();
 }
@@ -623,6 +808,8 @@ add_action('wp_ajax_nopriv_gpt_lookup_point_ajax', 'gpt_lookup_point_ajax_callba
 function gpt_lookup_point_ajax_callback() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_LOGS;
+    $exchange_table = BIZGPT_PLUGIN_WP_EXCHANGE_CODE_FOR_GIFT;
+    $user_table = BIZGPT_PLUGIN_WP_SAVE_USERS;
 
     $phone = sanitize_text_field($_POST['phone']);
 
@@ -637,21 +824,38 @@ function gpt_lookup_point_ajax_callback() {
         wp_send_json_error('Vui lòng nhập số điện thoại!');
     }
 
-    $diem_tich = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(point_change), 0) FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem'", $phone));
-    $diem_doi = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(point_change), 0) FROM $table WHERE phone_number = %s AND transaction_type = 'doi_diem'", $phone));
+    $user_points = $wpdb->get_row($wpdb->prepare(
+        "SELECT total_points, redeemed_points FROM $user_table WHERE phone_number = %s",
+        $phone
+    ));
 
-    if ($diem_tich == 0 && $diem_doi == 0) {
+    if (!$user_points) {
         wp_send_json_error('Không tìm thấy dữ liệu tích điểm cho số điện thoại này!');
     }
 
-    $diem_con_lai = intval($diem_tich) - abs(intval($diem_doi));
+    $diem_tich = intval($user_points->total_points);
+    $diem_doi = intval($user_points->redeemed_points);
+    $tong_diem = $diem_tich + $diem_doi;
+    // $diem_con_lai = $diem_tich - $diem_doi;
 
-    // Lấy lịch sử tích điểm
+    // Lấy điểm tích từ bảng logs
+    // $diem_tich = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(point_change), 0) FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem'", $phone));
+    
+    // Lấy điểm đổi từ bảng wp_gpt_exchange_gifts
+    // $diem_doi = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(points), 0) FROM $exchange_table WHERE phone = %s", $phone));
+
+    // if ($diem_tich == 0 && $diem_doi == 0) {
+    //     wp_send_json_error('Không tìm thấy dữ liệu tích điểm cho số điện thoại này!');
+    // }
+
+    // $diem_con_lai = intval($diem_tich) - abs(intval($diem_doi));
+
+    // Lấy lịch sử tích điểm từ bảng logs
     $total_tich = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem'", $phone));
     $total_pages_tich = ceil($total_tich / $per_page);
 
     $lich_su_tich = $wpdb->get_results($wpdb->prepare(
-        "SELECT point_change, product, created_at FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem' ORDER BY created_at DESC LIMIT %d OFFSET %d",
+        "SELECT point_change, product_name, created_at FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem' ORDER BY created_at DESC LIMIT %d OFFSET %d",
         $phone, $per_page, $offset_tich
     ));
 
@@ -660,33 +864,34 @@ function gpt_lookup_point_ajax_callback() {
         $history_point_detail[] = [
             'so_diem' => intval($log->point_change),
             'loai_giao_dich' => 'Tích điểm',
-            'product' => $log->product,
+            'product' => $log->product_name,
             'created_at' => date('d/m/Y H:i', strtotime($log->created_at))
         ];
     }
 
-    // Lấy lịch sử đổi điểm
-    $total_doi = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE phone_number = %s AND transaction_type = 'doi_diem'", $phone));
+    // Lấy lịch sử đổi điểm từ bảng wp_gpt_exchange_gifts
+    $total_doi = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $exchange_table WHERE phone = %s", $phone));
     $total_pages_doi = ceil($total_doi / $per_page);
 
     $lich_su_doi = $wpdb->get_results($wpdb->prepare(
-        "SELECT point_change, product, created_at FROM $table WHERE phone_number = %s AND transaction_type = 'doi_diem' ORDER BY created_at DESC LIMIT %d OFFSET %d",
+        "SELECT points, product, time FROM $exchange_table WHERE phone = %s ORDER BY time DESC LIMIT %d OFFSET %d",
         $phone, $per_page, $offset_doi
     ));
 
     $lich_su_doi_chi_tiet = [];
     foreach ($lich_su_doi as $log) {
         $lich_su_doi_chi_tiet[] = [
-            'so_diem' => intval($log->point_change),
+            'so_diem' => intval($log->points),
             'loai_giao_dich' => 'Đổi điểm',
             'product' => $log->product,
-            'created_at' => date('d/m/Y H:i', strtotime($log->created_at))
+            'created_at' => date('d/m/Y H:i', strtotime($log->time))
         ];
     }
 
     wp_send_json_success([
         'diem_tich' => intval($diem_tich),
         'diem_doi' => abs(intval($diem_doi)),
+        'tong_diem' => intval($tong_diem),
         'diem_con_lai' => max($diem_con_lai, 0),
         'lich_su_tich' => $history_point_detail,
         'lich_su_doi' => $lich_su_doi_chi_tiet,

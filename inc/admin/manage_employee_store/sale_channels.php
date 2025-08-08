@@ -31,8 +31,6 @@ function gpt_render_sales_channels_page() {
     $list = $wpdb->get_results("SELECT * FROM $table ORDER BY id DESC");
 
     ?>
-    <h2>Kênh bán hàng</h2>
-    <hr>
     <div class="gpt-admin-flex-layout">
         <div class="form-section">
             <form method="post">
@@ -45,7 +43,7 @@ function gpt_render_sales_channels_page() {
                     <label for="gpt_box_session">Mã kênh:</label>
                     <input name="channel_code" type="text" required value="<?php echo esc_attr($edit->channel_code ?? ''); ?>" class="regular-text" />
                 </div>
-                <input type="submit" class="button button-primary" value="<?php echo $edit ? 'Cập nhật' : 'Thêm mới'; ?>">
+                <input type="submit" class="button button-primary" value="<?php echo $edit ? 'Cập nhật' : 'Lưu thông tin'; ?>" style="width: 100%;">
             </form>
         </div>
         <div class="gpt-table-container">
@@ -67,8 +65,10 @@ function gpt_render_sales_channels_page() {
                             <td><?php echo esc_html($item->channel_code); ?></td>
                             <td><?php echo esc_html($item->created_at); ?></td>
                             <td>
-                                <a class="button button-edit" href="?page=gpt-config&tab=channels&edit=<?php echo $item->id; ?>">Sửa</a>
-                                <a class="button button-danger" onclick="return confirm('Bạn có chắc chắn xoá?')" href="?page=gpt-config&tab=channels&delete=<?php echo $item->id; ?>">Xoá</a>
+                                <div class="btn-actions">
+                                    <a class="button button-edit" href="?page=gpt-store-employee&tab=channels&edit=<?php echo $item->id; ?>">Sửa</a>
+                                    <a class="button button-danger" onclick="return confirm('Bạn có chắc chắn xoá?')" href="?page=gpt-store-employee&tab=channels&delete=<?php echo $item->id; ?>">Xoá</a>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; else: ?>

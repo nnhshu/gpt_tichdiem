@@ -18,13 +18,14 @@ function gpt_user_ranking_dashboard_render() {
     $date_condition = '';
 
     if ($filter === 'week') {
-        $date_condition = "AND last_activity_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+        $date_condition = "AND l.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
     } elseif ($filter === 'month') {
-        $date_condition = "AND last_activity_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        $date_condition = "AND l.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
     }
 
     global $wpdb;
     $user_table = BIZGPT_PLUGIN_WP_SAVE_USERS;
+    $logs_table = BIZGPT_PLUGIN_WP_LOGS;
 
     $ranking_posts = get_posts(array(
         'post_type' => 'ranking',
@@ -43,10 +44,20 @@ function gpt_user_ranking_dashboard_render() {
         ];
     }
 
+    // Lấy dữ liệu từ bảng logs với JOIN bảng users để lấy thông tin user
     $users = $wpdb->get_results("
-        SELECT id, full_name, phone_number, total_points
-        FROM $user_table
-        WHERE user_status = 'active' $date_condition
+        SELECT 
+            u.id, 
+            u.full_name, 
+            u.phone_number,
+            COALESCE(SUM(CASE WHEN l.transaction_type = 'tich_diem' THEN l.point_change ELSE 0 END), 0) as total_points
+        FROM $user_table u
+        LEFT JOIN $logs_table l ON u.phone_number = l.phone_number 
+            AND l.transaction_type = 'tich_diem'
+            $date_condition
+        WHERE u.user_status = 'active'
+        GROUP BY u.id, u.full_name, u.phone_number
+        HAVING total_points > 0
         ORDER BY total_points DESC
         LIMIT 10
     ");

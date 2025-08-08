@@ -15,6 +15,7 @@ function gpt_plugin_activate() {
     gpt_create_table_box();
     gpt_create_gpt_affiliate_logs_table();
     create_wp_order_refund_table();
+    create_wp_product_lot_table();
     // update_barcode_table_columns();
     // update_existing_log_table_for_affiliate();
     update_option('bizgpt_plugin_db_version', BIZGPT_PLUGIN_DB_VERSION);
@@ -63,6 +64,23 @@ function update_barcode_table_columns() {
 //         }
 //     }
 // }
+
+function create_wp_product_lot_table() {
+    global $wpdb;
+    
+    $table_name = BIZGPT_PLUGIN_WP_PRODUCT_LOT;
+    
+    $sql = "CREATE TABLE $table_name (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        lot_name varchar(255) NOT NULL,
+        product_id varchar(255) NOT NULL,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id)
+    ) {$wpdb->get_charset_collate()};";
+    
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+}
 
 function create_wp_order_refund_table() {
     global $wpdb;
@@ -117,6 +135,7 @@ function gpt_create_distributors_table() {
         id INT NOT NULL AUTO_INCREMENT,
         title VARCHAR(255),
         channel_id INT(20),
+        employee_id INT(20),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -156,6 +175,7 @@ function gpt_create_gpt_product_orders_table() {
         order_id INT NOT NULL,
         province VARCHAR(255),
         channel VARCHAR(255),
+        type VARCHAR(255),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -178,6 +198,7 @@ function gpt_create_gpt_products_sold_table() {
         order_id INT NOT NULL,
         province VARCHAR(255),
         channel VARCHAR(255),
+        type VARCHAR(255),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -230,7 +251,9 @@ function gpt_create_store_tables() {
         address text NOT NULL,
         image_url varchar(255) DEFAULT '',
         channel_id mediumint(9) NOT NULL,
+        phone_number VARCHAR(20),
         distributor_id INT(20),
+        employee_id INT(20),
         created_at datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -314,6 +337,9 @@ function gpt_create_or_update_tables() {
             product VARCHAR(255),
             province VARCHAR(255),
             channel VARCHAR(255),
+            distributor CHAR(4) DEFAULT '',
+            lot VARCHAR(255) DEFAULT '',
+            product_date VARCHAR(255) DEFAULT NULL,
             product_id VARCHAR(255),
             session INT(11),
             qr_code_url TEXT DEFAULT NULL,
@@ -351,6 +377,7 @@ function gpt_create_or_update_tables() {
             note_status VARCHAR(255) NULL,
             aff_by_store_id INT(10) NULL,
             aff_by_employee_code INT(10) NULL,
+            purchase_channel VARCHAR(255) DEFAULT '',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id)
         ) $charset_collate;";

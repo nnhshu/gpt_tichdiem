@@ -11,6 +11,10 @@ add_action('wp_ajax_nopriv_check_macao_ajax', 'check_macao_ajax_callback');
 add_action('wp_ajax_gpt_get_stores_by_code_token', 'gpt_get_stores_by_code_token');
 add_action('wp_ajax_gpt_get_employees_by_store', 'gpt_get_employees_by_store');
 
+add_action('wp_ajax_get_current_address', 'bizgpt_ajax_get_current_address');
+add_action('wp_ajax_nopriv_get_current_address', 'bizgpt_ajax_get_current_address');
+
+
 add_shortcode('gpt_form_accumulate_code','gpt_form_accumulate_code');
 
 function check_macao_ajax_callback() {
@@ -18,7 +22,7 @@ function check_macao_ajax_callback() {
 
     $table = BIZGPT_PLUGIN_WP_BARCODE;
     $code = sanitize_text_field($_POST['code']);
-
+    
     $code_info = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM {$table} WHERE LOWER(barcode) = LOWER(%s)",
         $code
@@ -47,12 +51,29 @@ function check_macao_ajax_callback() {
             $product_name = $product->post_title;
             $product_image = get_the_post_thumbnail_url($product->ID, 'medium');
             $product_price = wc_get_price_to_display(wc_get_product($product_id));
-            wp_send_json_success([
+
+            $product_info = [
                 'name' => $product_name,
                 'custom_prod_id' => $custom_prod_id,
                 'price' => wc_price($product_price),
-                'image' => $product_image ? $product_image : wc_placeholder_img_src()
+                'image' => $product_image ? $product_image : wc_placeholder_img_src(),
+                'points' => intval($code_info->point)
+            ];
+
+            wp_send_json_success([
+                'channel' => $code_info->channel,
+                'province' => $code_info->province,
+                'product' => $product_info,
+                'show_store_section' => in_array($code_info->channel, ['G', 'S', 'T']),
+                'show_referrer_section' => !in_array($code_info->channel, ['G', 'S', 'T']),
             ]);
+
+            // wp_send_json_success([
+            //     'name' => $product_name,
+            //     'custom_prod_id' => $custom_prod_id,
+            //     'price' => wc_price($product_price),
+            //     'image' => $product_image ? $product_image : wc_placeholder_img_src()
+            // ]);
         } else {
             wp_send_json_error('Không tìm thấy sản phẩm tương ứng.');
         }
@@ -200,6 +221,26 @@ function bizgpt_get_current_points($phone) {
     return intval($total_points);
 }
 
+function bizgpt_get_current_address($phone) {
+    global $wpdb;
+
+    $users_table = BIZGPT_PLUGIN_WP_SAVE_USERS;
+    $address = $wpdb->get_var($wpdb->prepare("SELECT address FROM $users_table WHERE phone_number = %s", $phone));
+    return $address;
+}
+
+function bizgpt_ajax_get_current_address() {
+    $phone = sanitize_text_field($_POST['phone'] ?? '');
+
+    if (!$phone) {
+        wp_send_json_error(['message' => 'Vui lòng điền vào số điện thoại']);
+    }
+
+    $address = bizgpt_get_current_address($phone);
+
+    wp_send_json_success(['address' => $address]);
+}
+
 function gpt_form_accumulate_code() {
 
     $client_id = getClientIdFromUrlPage();
@@ -224,9 +265,6 @@ function gpt_form_accumulate_code() {
     ?>
         <?php  wp_enqueue_style('gpt-form-style', plugin_dir_url(__FILE__) . 'form.css'); ?>        
         <div class="div-chuyen-huong-mes">
-            <div class="stars"></div>
-            <div class="shooting-star"></div>
-            <div class="glow"></div>
             <div class="content">
                 <img src="<?php echo esc_url($logo_image_url); ?>"
                     class="logo" alt="Logo Website" />
@@ -243,12 +281,6 @@ function gpt_form_accumulate_code() {
                 </button>
                 <img src="<?php echo esc_url($display_image_url); ?>"
                     alt="Cow surprise" class="cow-image" />
-            </div>
-            <div class="div-chat" onclick="goToMessenger()">
-                <p class="shop">Hệ thống:</p>
-                <p class="shop">📌 Điểm thưởng sẽ được cộng khi bạn bắt đầu trò chuyện.</p>
-                <p class="user">Ủa tích điểm đổi gì vậy?</p>
-                <p class="shop">🎁 Nhiều phần quà bất ngờ – khám phá trong chat nha!</p>
             </div>
         </div>
         <script>
@@ -271,15 +303,17 @@ function gpt_form_accumulate_code() {
         $affiliate_enabled = get_option('affiliate_enabled', 0);
         $affiliate_points = get_option('affiliate_points_per_referral', 10);
         $min_points_required = get_option('affiliate_min_points_required', 1);
-        $barcode_from_url = isset($_GET['barcode']) ? sanitize_text_field($_GET['barcode']) : '';
+        $title_message = get_option('gpt_success_notice_editor', '');
+        // $barcode_from_url = isset($_GET['barcode']) ? sanitize_text_field($_GET['barcode']) : '';
 
-        if (empty($barcode)) {
-            $ip = gpt_get_user_ip();
-            $transient_key = 'gpt_barcode_' . md5($ip);
-            $barcode = get_transient($transient_key);
-        }
+        $current_barcode = gpt_get_saved_barcode();
 
-        $is_locked = !empty($barcode);
+        // if (empty($barcode)) {
+        //     $ip = gpt_get_user_ip();
+        //     $transient_key = 'gpt_barcode_' . md5($ip);
+        //     $barcode = get_transient($transient_key);
+        // }
+
         if(isset($_GET['code']) && isset($_GET['token'])){
             global $wpdb;
             $table_name = BIZGPT_PLUGIN_WP_LOGS;
@@ -299,7 +333,7 @@ function gpt_form_accumulate_code() {
             $user_current_location = isset($_GET['user_current_location']) ? sanitize_text_field($_GET['user_current_location']) : '';
             $user_current_ward = isset($_GET['user_current_ward']) ? sanitize_text_field($_GET['user_current_ward']) : '';
             $user_current_province = isset($_GET['user_current_province']) ? sanitize_text_field($_GET['user_current_province']) : '';
-            $store_name = isset($_GET['store_name']) ? sanitize_text_field($_GET['store_name']) : '';
+            // $store_name = isset($_GET['store_name']) ? sanitize_text_field($_GET['store_name']) : '';
             $clientID = isset($_GET['client_id']) ? sanitize_text_field($_GET['client_id']) : '';
             // Lấy thông tin địa chỉ chi tiết mới
             $user_house_number = isset($_GET['user_house_number']) ? sanitize_text_field($_GET['user_house_number']) : '';
@@ -547,7 +581,7 @@ function gpt_form_accumulate_code() {
                         'phone_number' => $phone_number,
                         'point_change' => $points,
                         'product' => $custom_prod_id,
-                        'store' => !empty($store_name) ? $store_name : NULL,
+                        'store' => !empty($store_name_aff) ? $store_name_aff : NULL,
                         'point_location' => $user_current_location,
                         'address' => $address,
                         'province' => !empty($user_current_province) ? $user_current_province : NULL,
@@ -623,9 +657,8 @@ function gpt_form_accumulate_code() {
                         type="text" 
                         id="code" 
                         name="code" 
-                        value="<?php echo esc_attr($barcode); ?>" 
-                        placeholder="Mã định danh sản phẩm" 
-                        <?php echo $is_locked ? 'readonly style="background:#f9f9f9; color:#555;"' : ''; ?>
+                        value="<?php echo isset($_GET['code']) ? sanitize_text_field($_GET['code']) : $current_barcode; ?>" 
+                        placeholder="Mã định danh sản phẩm"
                         required
                     >    
                 </div>
@@ -643,7 +676,7 @@ function gpt_form_accumulate_code() {
                     <input type="text" id="address" name="address" value="<?php echo isset($_GET['address']) ? sanitize_text_field($_GET['address']) : ''; ?>" placeholder="Địa chỉ của bạn" required>
                 </div>
                 <hr>
-                <div class="gpt-toggle-wrapper">
+                <div class="gpt-toggle-wrapper" id="buyed_store">
                     <label class="gpt-toggle-label">Bạn mua tại cửa hàng nào</label>
                     <label class="gpt-toggle-switch">
                         <input type="checkbox" id="is_employee">
@@ -661,7 +694,7 @@ function gpt_form_accumulate_code() {
                     </div> -->
                 </div>
                 <?php if ($affiliate_enabled): ?>
-                    <div class="gpt-toggle-wrapper">
+                    <div class="gpt-toggle-wrapper" id="buyed_referrer">
                         <label class="gpt-toggle-label">Bạn có người giới thiệu</label>
                         <label class="gpt-toggle-switch">
                             <input type="checkbox" id="has_referrer">
@@ -711,7 +744,7 @@ function gpt_form_accumulate_code() {
                     <script>
                         const data = `<?php echo $response_message; ?>`;
                         Swal.fire({
-                            title: '🎉 Bimbosan cảm ơn bạn!',
+                            title: `<?php echo $title_message; ?>`,
                             html: `<?php echo $response_message; ?>`,
                             imageUrl: '<?php echo plugin_dir_url(__FILE__); ?>/image/bo_dt.png',
                             imageWidth: 128,
@@ -719,10 +752,10 @@ function gpt_form_accumulate_code() {
                             showCloseButton: true,
                             showDenyButton: true,
                             denyButtonText: 'Quay lại Trang chủ',
-                            confirmButtonText: 'Tích điểm thêm',
+                            confirmButtonText: 'Tiện ích khác',
                         }).then((result) => {
                             if (result.isConfirmed) {
-                                window.location.href = '<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>';
+                                window.location.href = '/tien-ich';
                             } else if (result.isDenied || result.dismiss === Swal.DismissReason.timer) {
                                 window.location.href = '/';
                             }
@@ -730,13 +763,28 @@ function gpt_form_accumulate_code() {
                     </script>
                 <?php endif; ?>
             </form>
-        </div>
+        </div>             
         <script>
             jQuery(document).ready(function($) {
-                let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+                let typingTimer;
+                let doneTypingInterval = 500;
+                let timer;
+                let lastPhone = '';
+
+                let referrerName = document.getElementById('referrer_name');
+
+                $('#referrer_info').hide();
+
+                let storeData = <?php echo $store_records_json; ?>;
+
+                const ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+
+                const codeInput = $('#code');
+                const initialCode = codeInput.val().trim();
                 
+                                
                 function toggleExclusive(activeId, otherId, typeValue) {
-                    $('#' + activeId).on('change', function() {
+                    $('#' + activeId).trigger('change', function() {
                         if ($(this).is(':checked')) {
                             $('#' + otherId).prop('checked', false).trigger('change');
                             $('#aff_check_type').val(typeValue);
@@ -746,8 +794,8 @@ function gpt_form_accumulate_code() {
                     });
                 }
 
-                toggleExclusive('is_employee', 'has_referrer', 'employee');
-                toggleExclusive('has_referrer', 'is_employee', 'affiliate');
+                $('#buyed_store').hide();
+                $('#buyed_referrer').hide();
 
                 $('#is_employee').on('change', function () {
                     $('.employee-fields').toggle(this.checked);
@@ -757,8 +805,8 @@ function gpt_form_accumulate_code() {
                     $('.referrer-fields').toggle(this.checked);
                 });
 
-                $('.gpt-select2').select2();
-                $('#store_id, #employee_id').select2({ placeholder: 'Vui lòng chọn', allowClear: true });
+                // $('.gpt-select2').select2();
+                // $('#store_id, #employee_id').select2({ placeholder: 'Vui lòng chọn', allowClear: true });
 
                 $('#code, #token').on('change blur', function() {
                     let code = $('#code').val().trim();
@@ -770,15 +818,17 @@ function gpt_form_accumulate_code() {
                             code: code,
                             token: token
                         }, function(res) {
-                            console.log(res)
                             if (res.success) {
                                 let stores = res.data;
                                 console.log(stores)
                                 $('#store_id').html('');
+                                $('#store_id').append(`<option value="">$--- Vui lòng chọn cửa hàng ---</option>`);
                                 $.each(stores, function(i, store) {
                                     $('#store_id').append(`<option value="${store.id}">${store.name}</option>`);
                                 });
+                                $('.employee-fields').toggle(this.checked);
                                 $('#store_id').trigger('change');
+                                $('#store_id').select2({ placeholder: 'Vui lòng chọn', allowClear: true });
                             }
                         });
                     }
@@ -821,16 +871,6 @@ function gpt_form_accumulate_code() {
                     $('#aff_check_type').val('affiliate');
                     $('.referrer-fields').show();
                 }
-            });
-        </script>
-        <script>
-            jQuery(document).ready(function($) {
-                const ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-                const doneTypingInterval = 500; 
-                let typingTimer;
-
-                const codeInput = $('#code');
-                const initialCode = codeInput.val().trim();
 
                 if (initialCode !== '') {
                     $('#product_info').html('<p class="text-gray-500 mt-2">Đang kiểm tra mã...</p>');
@@ -841,7 +881,7 @@ function gpt_form_accumulate_code() {
                             code: initialCode
                         }, function (response) {
                             if (response.success) {
-                                let productInfo = response.data;
+                                let productInfo = response.data.product;
                                 $('#product_info').html(`
                                     <div class="prod_item">
                                         <div class="prod_item_left"><img src="${productInfo.image}" alt="${productInfo.name}"></div>
@@ -859,36 +899,22 @@ function gpt_form_accumulate_code() {
                         });
                     }, doneTypingInterval);
                 }
-            });
-        </script>              
-        <script>
-            jQuery(document).ready(function($) {
-                let typingTimer;
-                let doneTypingInterval = 500;
-                let timer;
-                let lastPhone = '';
-
-                let referrerName = document.getElementById('referrer_name');
-
-                $('#referrer_info').hide();
-
-                let storeData = <?php echo $store_records_json; ?>;
-                $('#store_name').select2({
-                    placeholder: 'TÊN CỬA HÀNG MUA HÀNG',
-                    allowClear: true,
-                    width: '100%',
-                    language: {
-                        noResults: function() {
-                            return "Không tìm thấy kết quả";
-                        },
-                        searching: function() {
-                            return "Đang tìm kiếm...";
-                        },
-                        loadingMore: function() {
-                            return "Đang tải thêm...";
-                        }
-                    }
-                });
+                // $('#store_name').select2({
+                //     placeholder: 'TÊN CỬA HÀNG MUA HÀNG',
+                //     allowClear: true,
+                //     width: '100%',
+                //     language: {
+                //         noResults: function() {
+                //             return "Không tìm thấy kết quả";
+                //         },
+                //         searching: function() {
+                //             return "Đang tìm kiếm...";
+                //         },
+                //         loadingMore: function() {
+                //             return "Đang tải thêm...";
+                //         }
+                //     }
+                // });
                 fillLocationDataToForm();
                 function getAddressFromCoordinates(lat, lng) {
                     var url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`;
@@ -904,10 +930,10 @@ function gpt_form_accumulate_code() {
                             const postcode = data.address.postcode || '';
                             const full_address = data.display_name;
 
-                            // console.log('Tỉnh: ' + city);
-                            // console.log('Phường/Xã: ' + ward);
-                            // console.log('Địa chỉ chi tiết: ' + house_number + ' ' + road);
-                            // console.log('Địa chỉ đầy đủ: ' + full_address);
+                            console.log('Tỉnh: ' + city);
+                            console.log('Phường/Xã: ' + ward);
+                            console.log('Địa chỉ chi tiết: ' + house_number + ' ' + road);
+                            console.log('Địa chỉ đầy đủ: ' + full_address);
 
                             $('#user_current_location').val(address);
                             $('#user_current_ward').val(ward);
@@ -952,6 +978,7 @@ function gpt_form_accumulate_code() {
                     var locationData = getUserLocationData();
                     
                     if (locationData) {
+                        updateFormWithNewLocation(locationData);
                         // Điền thông tin GPS
                         $('#user_location').val(locationData.coordinates.latitude + ',' + locationData.coordinates.longitude);
                         
@@ -1049,6 +1076,25 @@ function gpt_form_accumulate_code() {
                     console.log('Đã xóa vị trí khỏi localStorage');
                 }
 
+                $('#phone_number').on('change blur', function() {
+                    let phone = $(this).val().trim();
+
+                    if (phone) {
+                        $.post( ajaxurl, {
+                            action: 'get_current_address',
+                            phone: phone
+                        }, function(res) {
+                            if (res.success) {
+                                console.log("Address:", res.data.address);
+                                $('#address').val(res.data.address);
+                            } else {
+                                console.error("Error:", res.data.message);
+                                $('#address').val('');
+                            }
+                        });
+                    }
+                });
+
                 $('#code').on('keyup', function() {
                     clearTimeout(typingTimer);
                     let code = $(this).val().trim();
@@ -1062,13 +1108,28 @@ function gpt_form_accumulate_code() {
                                 code: code
                             }, function(response) {
                                 if (response.success) {
-                                    let productInfo = response.data;
+                                    let productInfo = response.data.product;
                                     $('#product_info').html(`
                                         <div class="prod_item">
                                             <div class="prod_item_left"><img src="${productInfo.image}" alt="${productInfo.name}"></div>
                                             <div class="prod_item_right"><h4 class="">Thông tin sản phẩm:</h4><p><strong>${productInfo.name} - ${productInfo.custom_prod_id}</strong></p><h5 class="">Giá niêm yết:</h5><p><strong>${productInfo.price}</strong></p></div>
                                         </div>
                                     `);
+                                    if(response.data.show_store_section == true){
+                                        // toggleExclusive('is_employee', 'has_referrer', 'employee');
+                                        $('#buyed_store').show();
+                                        $('#is_employee').prop('checked', true);
+                                        $('.employee-fields').show();
+                                        $('#buyed_referrer').hide();
+                                        $('#aff_check_type').val('employee');
+                                    } else{
+                                        $('#buyed_store').hide();
+                                        $('#has_referrer').prop('checked', true);
+                                        $('.referrer-fields').show();
+                                        $('#buyed_referrer').show();
+                                         $('#aff_check_type').val('affiliate');
+                                        // toggleExclusive('has_referrer', 'is_employee', 'affiliate');
+                                    }
                                 } else {
                                     $('#product_info').html(`<p class="text-red-500 mt-2">${response.data}</p>`);
                                 }

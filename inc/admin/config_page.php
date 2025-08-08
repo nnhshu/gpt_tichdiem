@@ -707,8 +707,17 @@ add_action('wp_ajax_gpt_create_box_code_batch', 'gpt_create_box_code_batch');
 
 
 function generate_token_4_chars() {
-    $characters = '0123456789';
-    return substr(str_shuffle($characters), 0, 4);
+    $first_digits = '123456789';
+    
+    $other_digits = '0123456789';
+    
+    $token = $first_digits[rand(0, strlen($first_digits) - 1)];
+    
+    for ($i = 1; $i < 4; $i++) {
+        $token .= $other_digits[rand(0, strlen($other_digits) - 1)];
+    }
+    
+    return $token;
 }
 
 function generate_unique_token() {

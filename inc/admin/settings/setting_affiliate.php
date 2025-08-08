@@ -47,7 +47,7 @@ function gpt_affiliate_setting_page() {
     }
     ?>
 
-    <div class="gpt-tich-diem-form">
+    <div class="gpt-tich-diem-form bg-grey">
         <h2>Cấu hình tích điểm và Chương trình Affiliate</h2>
         <div class="affiliate-status" style="padding: 10px; border-left: 4px solid #0073aa; background: #fff;">
             <strong>Trạng thái hiện tại:</strong>
