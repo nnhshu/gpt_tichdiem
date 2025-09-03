@@ -1,10 +1,13 @@
-<?php 
-
+<?php
 function gpt_render_sales_channels_page() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_CHANNELS;
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && current_user_can('manage_options')) {
+    // Kiểm tra quyền của user hiện tại
+    $current_user = wp_get_current_user();
+    $can_manage = current_user_can('manage_options') || in_array('quan_ly_kho', $current_user->roles);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_manage) {
         $id = intval($_POST['id'] ?? 0);
         $title = sanitize_text_field($_POST['title']);
         $channel_code = sanitize_text_field($_POST['channel_code']);
@@ -18,7 +21,7 @@ function gpt_render_sales_channels_page() {
         echo '<div class="updated"><p>Lưu thành công.</p></div>';
     }
 
-    if (isset($_GET['delete']) && current_user_can('manage_options')) {
+    if (isset($_GET['delete']) && $can_manage) {
         $wpdb->delete($table, ['id' => intval($_GET['delete'])]);
         echo '<div class="updated"><p>Đã xoá thành công.</p></div>';
     }
@@ -32,6 +35,7 @@ function gpt_render_sales_channels_page() {
 
     ?>
     <div class="gpt-admin-flex-layout">
+        <?php if ($can_manage): ?>
         <div class="form-section">
             <form method="post">
                 <input type="hidden" name="id" value="<?php echo esc_attr($edit->id ?? 0); ?>">
@@ -46,6 +50,14 @@ function gpt_render_sales_channels_page() {
                 <input type="submit" class="button button-primary" value="<?php echo $edit ? 'Cập nhật' : 'Lưu thông tin'; ?>" style="width: 100%;">
             </form>
         </div>
+        <?php else: ?>
+        <div class="form-section">
+            <div class="notice notice-warning">
+                <p>Bạn không có quyền thêm/sửa dữ liệu.</p>
+            </div>
+        </div>
+        <?php endif; ?>
+        
         <div class="gpt-table-container">
             <table class="widefat striped">
                 <thead>
@@ -54,7 +66,9 @@ function gpt_render_sales_channels_page() {
                         <th>Tiêu đề</th>
                         <th>Mã kênh</th>
                         <th>Ngày tạo</th>
+                        <?php if ($can_manage): ?>
                         <th>Hành động</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -64,15 +78,17 @@ function gpt_render_sales_channels_page() {
                             <td><?php echo esc_html($item->title); ?></td>
                             <td><?php echo esc_html($item->channel_code); ?></td>
                             <td><?php echo esc_html($item->created_at); ?></td>
+                            <?php if ($can_manage): ?>
                             <td>
                                 <div class="btn-actions">
                                     <a class="button button-edit" href="?page=gpt-store-employee&tab=channels&edit=<?php echo $item->id; ?>">Sửa</a>
                                     <a class="button button-danger" onclick="return confirm('Bạn có chắc chắn xoá?')" href="?page=gpt-store-employee&tab=channels&delete=<?php echo $item->id; ?>">Xoá</a>
                                 </div>
                             </td>
+                            <?php endif; ?>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="5">Không có dữ liệu.</td></tr>
+                        <tr><td colspan="<?php echo $can_manage ? '5' : '4'; ?>">Không có dữ liệu.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

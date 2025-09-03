@@ -111,10 +111,6 @@ function render_import_check_fields($post) {
             display: block;
         }
     </style>
-    <!-- <div class="form-group">
-        <label for="order_id">ID Đơn hàng:</label>
-        <input type="text" name="order_id" id="order_id" value="<?php echo esc_attr($order_id); ?>" style="width:100%;">
-    </div> -->
     <div class="form-group">
         <label for="import_date">Ngày giờ nhập:</label>
         <input type="datetime-local" name="import_date" id="import_date"
@@ -200,16 +196,15 @@ function save_import_check_fields($post_id) {
     $current_user = wp_get_current_user();
     $order_import_by = $current_user->user_login;
 
-    // Cập nhật các meta fields cơ bản (không phụ thuộc vào trạng thái)
+    // Cập nhật các meta fields cơ bản
     import_update_post_meta_if_changed($post_id, 'import_images', sanitize_text_field($_POST['import_images']));
     import_update_post_meta_if_changed($post_id, 'import_date', sanitize_text_field($_POST['import_date']));
     import_update_post_meta_if_changed($post_id, 'order_import_by', sanitize_text_field($_POST['order_import_by']) ?  sanitize_text_field($_POST['order_import_by']) : $order_import_by);
 
-    // Xử lý trạng thái import trước
+    // Xử lý trạng thái import
     $old_status = get_post_meta($post_id, 'import_status', true);
     $new_status = isset($_POST['import_status']) ? sanitize_text_field($_POST['import_status']) : $old_status;
     
-    // Cập nhật trạng thái nếu có thay đổi
     if ($new_status !== $old_status) {
         update_post_meta($post_id, 'import_status', $new_status);
         $status_logs = get_post_meta($post_id, 'import_status_logs', true);
@@ -222,7 +217,7 @@ function save_import_check_fields($post_id) {
         update_post_meta($post_id, 'import_status_logs', $status_logs);
     }
 
-    // Luôn lưu thông tin boxes vào post meta (để không mất dữ liệu)
+    // Luôn lưu thông tin boxes vào post meta
     $boxes = $_POST['import_check_boxes'] ?? [];
     $existing_boxes = get_post_meta($post_id, '_import_check_boxes', true);
     
@@ -232,7 +227,6 @@ function save_import_check_fields($post_id) {
 
     // Kiểm tra trạng thái: chỉ cập nhật SQL khi trạng thái là "completed"
     if ($new_status !== 'completed') {
-        // Nếu không phải trạng thái "completed", chỉ lưu vào post meta và dừng lại
         $logs = get_post_meta($post_id, '_import_logs', true);
         if (!is_array($logs)) $logs = [];
         
@@ -245,10 +239,85 @@ function save_import_check_fields($post_id) {
         ];
         
         update_post_meta($post_id, '_import_logs', $logs);
-        return; // Dừng lại, không cập nhật SQL
+        return;
     }
 
-    // Chỉ thực hiện cập nhật SQL khi trạng thái là "completed"
+    // Validate tất cả mã trước khi lưu vào database
+    $validation_errors = [];
+    $all_valid = true;
+
+    foreach ($boxes as $box) {
+        $box_code = sanitize_text_field($box['box_code']);
+        $product_codes = sanitize_textarea_field($box['product_codes']);
+        
+        if (empty($box_code) || empty($product_codes)) continue;
+
+        // Check box code status
+        $existing_box = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $box_table WHERE barcode = %s",
+            $box_code
+        ));
+
+        if (!$existing_box) {
+            $validation_errors[] = "Mã thùng '$box_code' không tồn tại trong database";
+            $all_valid = false;
+        } elseif ($existing_box->status !== 'unused') {
+            $validation_errors[] = "Mã thùng '$box_code' đã được sử dụng (status: {$existing_box->status})";
+            $all_valid = false;
+        }
+
+        // Check product codes status
+        $codes = array_filter(array_map('trim', explode("\n", $product_codes)));
+        foreach ($codes as $code) {
+            $existing_barcode = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $barcode_table WHERE barcode = %s",
+                $code
+            ));
+
+            if (!$existing_barcode) {
+                $validation_errors[] = "Mã sản phẩm '$code' không tồn tại trong database";
+                $all_valid = false;
+            } elseif ($existing_barcode->status !== 'unused') {
+                $validation_errors[] = "Mã sản phẩm '$code' đã được sử dụng (status: {$existing_barcode->status})";
+                $all_valid = false;
+            }
+        }
+    }
+
+    // Nếu có lỗi validation, không cho phép lưu
+    if (!$all_valid) {
+        $logs = get_post_meta($post_id, '_import_logs', true);
+        if (!is_array($logs)) $logs = [];
+        
+        $timestamp = current_time('mysql');
+        foreach ($validation_errors as $error) {
+            $logs[] = [
+                'status' => sprintf("[%s] ❌ Lỗi validation: %s", $timestamp, $error),
+                'timestamp' => $timestamp
+            ];
+        }
+        
+        update_post_meta($post_id, '_import_logs', $logs);
+        
+        // Đặt lại trạng thái về pending
+        update_post_meta($post_id, 'import_status', 'pending');
+        
+        // Thông báo lỗi cho admin
+        add_action('admin_notices', function() use ($validation_errors) {
+            echo '<div class="notice notice-error is-dismissible">';
+            echo '<p><strong>Không thể cập nhật vào database do lỗi validation:</strong></p>';
+            echo '<ul>';
+            foreach ($validation_errors as $error) {
+                echo '<li>' . esc_html($error) . '</li>';
+            }
+            echo '</ul>';
+            echo '</div>';
+        });
+        
+        return;
+    }
+
+    // Nếu validation passed, tiếp tục cập nhật database
     if ($boxes !== $existing_boxes || $old_status !== 'completed') {
         $logs = get_post_meta($post_id, '_import_logs', true);
         if (!is_array($logs)) $logs = [];
@@ -265,73 +334,36 @@ function save_import_check_fields($post_id) {
             $product_codes = sanitize_textarea_field($box['product_codes']);
             $lot_date = sanitize_textarea_field($box['lot_date']);
 
-            if (empty($box_code) || empty($product_codes)) {
-                $logs[] = [
-                    'status' => sprintf("[%s] ⚠️ Bỏ qua thùng thiếu thông tin: %s", $timestamp, $box_code ?: 'Không có mã thùng'),
-                    'timestamp' => $timestamp
-                ];
-                continue;
-            }
+            if (empty($box_code) || empty($product_codes)) continue;
 
-            // Tách danh sách mã sản phẩm
             $codes = array_filter(array_map('trim', explode("\n", $product_codes)));
-
-            // Kiểm tra thùng đã tồn tại trong database chưa
-            $existing_box = $wpdb->get_row($wpdb->prepare(
-                "SELECT * FROM $box_table WHERE barcode = %s",
-                $box_code
-            ));
-
             $list_barcode = implode(',', $codes);
 
-            if ($existing_box) {
-                // Cập nhật thùng hiện có
-                $update_result = $wpdb->update(
-                    $box_table,
-                    [
-                        'list_barcode' => $list_barcode,
-                        'order_id' => $post_id,
-                        'status' => 'imported',
-                        'updated_at' => $timestamp
-                    ],
-                    ['barcode' => $box_code]
-                );
-
-                if ($update_result !== false) {
-                    $logs[] = [
-                        'status' => sprintf("[%s] 📦 Cập nhật thùng [%s] với %d mã sản phẩm", $timestamp, $box_code, count($codes)),
-                        'timestamp' => $timestamp
-                    ];
-                } else {
-                    $logs[] = [
-                        'status' => sprintf("[%s] ❌ Lỗi cập nhật thùng [%s]: %s", $timestamp, $box_code, $wpdb->last_error),
-                        'timestamp' => $timestamp
-                    ];
-                }
-            } else {
-                // Thêm thùng mới
-                $insert_result = $wpdb->insert($box_table, [
-                    'barcode' => $box_code,
+            // Update box status to 'imported'
+            $update_result = $wpdb->update(
+                $box_table,
+                [
                     'list_barcode' => $list_barcode,
                     'order_id' => $post_id,
                     'status' => 'imported',
-                    'created_at' => $timestamp
-                ]);
+                    'updated_at' => $timestamp
+                ],
+                ['barcode' => $box_code]
+            );
 
-                if ($insert_result !== false) {
-                    $logs[] = [
-                        'status' => sprintf("[%s] ✅ Tạo mới thùng [%s] với %d mã sản phẩm", $timestamp, $box_code, count($codes)),
-                        'timestamp' => $timestamp
-                    ];
-                } else {
-                    $logs[] = [
-                        'status' => sprintf("[%s] ❌ Lỗi tạo thùng [%s]: %s", $timestamp, $box_code, $wpdb->last_error),
-                        'timestamp' => $timestamp
-                    ];
-                }
+            if ($update_result !== false) {
+                $logs[] = [
+                    'status' => sprintf("[%s] 📦 Cập nhật thùng [%s] với %d mã sản phẩm", $timestamp, $box_code, count($codes)),
+                    'timestamp' => $timestamp
+                ];
+            } else {
+                $logs[] = [
+                    'status' => sprintf("[%s] ❌ Lỗi cập nhật thùng [%s]: %s", $timestamp, $box_code, $wpdb->last_error),
+                    'timestamp' => $timestamp
+                ];
             }
 
-            // Cập nhật bảng barcode cho từng mã sản phẩm
+            // Update product codes status to 'used'
             $successful_codes = 0;
             $failed_codes = 0;
 
@@ -339,41 +371,27 @@ function save_import_check_fields($post_id) {
                 $code = trim($code);
                 if (empty($code)) continue;
 
-                // Kiểm tra mã sản phẩm có tồn tại không
-                $existing_barcode = $wpdb->get_row($wpdb->prepare(
-                    "SELECT * FROM $barcode_table WHERE barcode = %s",
-                    $code
-                ));
+                $update_barcode_result = $wpdb->update(
+                    $barcode_table,
+                    [
+                        'box_barcode' => $box_code,
+                        'product_date' => $lot_date,
+                        'status' => 'unused',
+                    ],
+                    ['barcode' => $code]
+                );
 
-                if ($existing_barcode) {
-                    $update_barcode_result = $wpdb->update(
-                        $barcode_table,
-                        [
-                            'box_barcode' => $box_code,
-                            'product_date' => $lot_date,
-                        ],
-                        ['barcode' => $code]
-                    );
-
-                    if ($update_barcode_result !== false) {
-                        $successful_codes++;
-                    } else {
-                        $failed_codes++;
-                        $logs[] = [
-                            'status' => sprintf("[%s] ❌ Lỗi cập nhật mã %s: %s", $timestamp, $code, $wpdb->last_error),
-                            'timestamp' => $timestamp
-                        ];
-                    }
+                if ($update_barcode_result !== false) {
+                    $successful_codes++;
                 } else {
                     $failed_codes++;
                     $logs[] = [
-                        'status' => sprintf("[%s] ❌ Không tìm thấy mã %s trong hệ thống", $timestamp, $code),
+                        'status' => sprintf("[%s] ❌ Lỗi cập nhật mã %s: %s", $timestamp, $code, $wpdb->last_error),
                         'timestamp' => $timestamp
                     ];
                 }
             }
 
-            // Log tổng kết cho thùng này
             if ($successful_codes > 0) {
                 $logs[] = [
                     'status' => sprintf("[%s] ✅ Thành công: %d mã được gán vào thùng %s", $timestamp, $successful_codes, $box_code),
@@ -406,23 +424,27 @@ add_action('admin_enqueue_scripts', function($hook) {
     }
 });
 
+
 function display_import_logs_metabox($post) {
     // Lấy logs từ post_meta
     $logs = get_post_meta($post->ID, '_import_logs', true);
-
+    
     // Nếu không có logs, hiển thị thông báo
     if (empty($logs)) {
         echo '<p>No logs available.</p>';
         return;
     }
-
+    
+    // Đảo ngược thứ tự logs để hiển thị từ mới đến cũ
+    $logs = array_reverse($logs);
+    
     // Hiển thị logs
     echo '<ul>';
     foreach ($logs as $log) {
         // Kiểm tra sự tồn tại của các khóa 'timestamp' và 'status'
         $timestamp = isset($log['timestamp']) ? esc_html($log['timestamp']) : 'N/A';
         $status = isset($log['status']) ? esc_html($log['status']) : 'Unknown';
-
+        
         echo '<li>' . $timestamp . ' - ' . $status . '</li>';
     }
     echo '</ul>';
@@ -439,10 +461,11 @@ function render_import_status_box($post) {
     // Kiểm tra quyền của user hiện tại
     $is_admin = current_user_can('administrator');
     $is_editor = current_user_can('editor');
-    
+    $is_quan_ly_kho = in_array('quan_ly_kho', $current_user->roles);
+        
     // Xác định các trạng thái được phép chọn
-    if ($is_admin) {
-        // Admin có full quyền
+    if ($is_admin || $is_quan_ly_kho) {
+        // Admin và Quản lý kho có full quyền
         $allowed_statuses = $all_statuses;
     } elseif ($is_editor) {
         // Biên tập viên chỉ được chọn "Chờ duyệt"
@@ -453,7 +476,7 @@ function render_import_status_box($post) {
     }
 
     echo '<div style="margin-bottom: 15px;">';
-    
+        
     // Hiển thị thông báo về tác động của trạng thái
     if ($current_status === 'pending' || empty($current_status)) {
         echo '<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 3px; padding: 10px; margin-bottom: 10px;">';
@@ -468,31 +491,31 @@ function render_import_status_box($post) {
     }
 
     echo '<select name="import_status">';
-    
+        
     foreach ($allowed_statuses as $value => $label) {
         $selected = selected($current_status, $value, false);
         echo '<option value="' . esc_attr($value) . '" ' . $selected . '>' . esc_html($label) . '</option>';
     }
-    
+        
     if (!array_key_exists($current_status, $allowed_statuses) && !empty($current_status)) {
         $current_label = isset($all_statuses[$current_status]) ? $all_statuses[$current_status] : $current_status;
         echo '<option value="' . esc_attr($current_status) . '" selected disabled>' . esc_html($current_label) . ' (Chỉ đọc)</option>';
     }
-    
+        
     echo '</select>';
-    
-    // Thêm thông báo cảnh báo cho admin
-    if ($is_admin) {
+        
+    // Thêm thông báo cảnh báo cho admin và quản lý kho
+    if ($is_admin || $is_quan_ly_kho) {
         echo '<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 3px; padding: 8px; margin-top: 10px; font-size: 12px;">';
-        echo '<strong>📋 Lưu ý:</strong><br>';
+        echo '<strong style="color: #bc0000;">📋 Lưu ý:</strong><br>';
         echo '• <strong>Chờ duyệt:</strong> Chỉ lưu vào nháp để quản lý duyệt<br>';
-        echo '• <strong>Hoàn thành:</strong> Cập nhật dữ liệu cho thùng';
+        echo '• <strong>Hoàn thành:</strong> Cập nhật dữ liệu cho thùng<br>';
+        echo '• <strong style="color: #bc0000;">Khi đơn hàng ở trạng thái "Hoàn thành" thì sẽ không được cập nhật dữ liệu mới.</strong>';
         echo '</div>';
     }
-    
+        
     echo '</div>';
 }
-
 function render_import_logs_box($post) {
     $logs = get_post_meta($post->ID, 'import_status_logs', true);
     if (!is_array($logs) || empty($logs)) {
@@ -589,100 +612,57 @@ function display_import_check_products_box($post) {
     if (!is_array($boxes)) $boxes = [];
     ?>
     <style>
-        .widefat input, .widefat textarea {
-            width: 100% !important;
-        }
-        .summary-stats {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            padding: 15px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-around;
-            text-align: center;
-        }
-        .stat-item {
-            flex: 1;
-        }
-        .stat-number {
-            font-size: 24px;
-            font-weight: bold;
-            color: #0073aa;
-        }
-        .stat-label {
-            font-size: 14px;
-            color: #666;
-            margin-top: 5px;
-        }
-        .required-field {
-            border: 2px solid #dc3545 !important;
-            background-color: #fff5f5 !important;
-        }
-        .valid-field {
-            border: 2px solid #28a745 !important;
-            background-color: #f8fff8 !important;
-        }
-        .validation-summary {
-            margin: 15px 0;
-            padding: 15px;
+        .widefat input, .widefat textarea { width: 100% !important; }
+        .summary-stats { background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; margin-bottom: 20px; display: flex; justify-content: space-around; text-align: center; }
+        .stat-item { flex: 1; }
+        .stat-number { font-size: 24px; font-weight: bold; color: #0073aa; }
+        .stat-label { font-size: 14px; color: #666; margin-top: 5px; }
+        .validation-summary { margin: 15px 0; padding: 15px; border-radius: 5px; border-left: 4px solid; }
+        .validation-summary.error { border-color: #dc3545; color: #721c24; }
+        .validation-summary.success { background: #d4edda; border-color: #28a745; color: #155724; }
+        .validation-summary.checking { background: #fff3cd; border-color: #ffc107; color: #856404; }
+        .required-field { border: 2px solid #dc3545 !important; background-color: #fff5f5 !important; }
+        .valid-field { border: 2px solid #28a745 !important; background-color: #f8fff8 !important; }
+        .invalid-code { border: 2px solid #e74c3c !important; background-color: #ffe6e6 !important; }
+        .assigned-to-box { border: 2px solid #ff6b35 !important; background-color: #fff4f1 !important; }
+        .submit-button-disabled { opacity: 0.5 !important; cursor: not-allowed !important; background-color: #ccc !important; pointer-events: none !important; }
+        .checking-progress { margin: 10px 0; padding: 10px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px; }
+        .check-step { margin: 5px 0; padding: 5px; border-radius: 3px; }
+        .check-step.success { background: #d4edda; color: #155724; }
+        .check-step.error { background: #f8d7da; color: #721c24; }
+        .check-step.warning { background: #fff3cd; color: #856404; }
+        .check-step.checking { background: #e3f2fd; color: #1976d2; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .duplicate-row {
+            background-color: #ffe6e6 !important;
+            border: 2px solid #e74c3c !important;
             border-radius: 5px;
-            border-left: 4px solid;
         }
-        .validation-summary.error {
-            background: #f8d7da;
-            border-color: #dc3545;
-            color: #721c24;
-        }
-        .validation-summary.success {
-            background: #d4edda;
-            border-color: #28a745;
-            color: #155724;
-        }
-        .submit-button-disabled {
-            opacity: 0.5 !important;
-            cursor: not-allowed !important;
-            background-color: #ccc !important;
-            pointer-events: none !important;
+        .duplicate-row td {
+            background-color: #ffe6e6 !important;
         }
     </style>
     
-    <!-- Validation Summary -->
+    <div class="summary-stats">
+        <div class="stat-item"><div class="stat-number" id="total-boxes">0</div><div class="stat-label">📦 Tổng số thùng</div></div>
+        <div class="stat-item"><div class="stat-number" id="total-codes">0</div><div class="stat-label">🏷️ Tổng số mã</div></div>
+        <div class="stat-item"><div class="stat-number" id="expected-codes">0</div><div class="stat-label">📊 Số mã dự kiến</div></div>
+        <div class="stat-item"><div class="stat-number" id="match-status">-</div><div class="stat-label">✅ Trạng thái khớp</div></div>
+    </div>
+
     <div id="validation-summary" class="validation-summary error">
         <h4>⚠️ Cần nhập thêm thông tin để có thể cập nhật</h4>
-        <ul id="validation-list">
-            <li>❌ Tiêu đề bài viết</li>
-            <li>❌ Ngày giờ nhập</li>
-            <li>❌ Ít nhất 1 thùng hàng hợp lệ</li>
-        </ul>
+        <ul id="validation-list"><li>❌ Chưa kiểm tra dữ liệu</li></ul>
     </div>
-    
-    <!-- Summary Statistics -->
-    <div class="summary-stats">
-        <div class="stat-item">
-            <div class="stat-number" id="total-boxes">0</div>
-            <div class="stat-label">📦 Tổng số thùng</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-number" id="total-codes">0</div>
-            <div class="stat-label">🏷️ Tổng số mã</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-number" id="expected-codes">0</div>
-            <div class="stat-label">📊 Số mã dự kiến</div>
-        </div>
-        <div class="stat-item">
-            <div class="stat-number" id="match-status">-</div>
-            <div class="stat-label">✅ Trạng thái khớp</div>
-        </div>
-    </div>
-    
+
     <div id="import_check_boxes_container">
         <table class="widefat" id="import_check_boxes_table" style="margin-bottom:10px;">
             <thead>
                 <tr>
-                    <th>Mã định danh thùng</th>
+                    <th>Mã định danh thùng <span style="color: red;">*</span></th>
                     <th>Số lượng mã sản phẩm</th>
-                    <th>Danh sách mã sản phẩm</th>
+                    <th>Danh sách mã sản phẩm <span style="color: red;">*</span></th>
                     <th>Date <span style="color: red;">*</span></th>
                     <th>Trạng thái & Thông báo</th>
                     <th></th>
@@ -692,820 +672,1286 @@ function display_import_check_products_box($post) {
                 <?php
                 if (!empty($boxes)) {
                     foreach ($boxes as $index => $box) {
-                        $box_code = isset($box['box_code']) ? $box['box_code'] : '';
-                        $product_quantity = isset($box['product_quantity']) ? $box['product_quantity'] : '';
-                        $product_codes = isset($box['product_codes']) ? $box['product_codes'] : '';
-                        $lot_date = isset($box['lot_date']) ? $box['lot_date'] : '';
-                        echo render_import_box_row($box_code, $product_quantity, $product_codes, $lot_date, $index);
+                        echo render_import_box_row(
+                            $box['box_code'] ?? '',
+                            $box['product_quantity'] ?? '',
+                            $box['product_codes'] ?? '',
+                            $box['lot_date'] ?? '',
+                            $index
+                        );
                     }
                 }
                 ?>
             </tbody>
         </table>
-        
         <button type="button" class="button" id="add_box_row">+ Thêm thùng hàng</button>
-        <button type="button" class="button button-primary" id="check_box_quantities" style="margin-left: 10px;">🔍 Check số lượng</button>
-        <button type="button" class="button button-secondary" id="check_box_duplicates" style="margin-left: 10px;">⚠️ Check trùng lặp</button>
-        <button type="button" class="button button-info" id="refresh_summary" style="margin-left: 10px;">📊 Cập nhật tổng kết</button>
+        <button type="button" class="button button-primary" id="check_all_validations" style="margin-left: 10px;">
+            <strong>🔍 Kiểm tra tất cả</strong>
+        </button>
+        <span id="last-check-time" style="margin-left: 15px; color: #666; font-style: italic; display: inline-block; margin-top: 6px;"></span>
     </div>
+    <span style="margin-top: 12px; display: inline-block;">Vui lòng bấm nút "Kiểm tra tất cả" trước khi lưu dữ liệu.</span>
 
     <script>
-        // ============ VALIDATION STATE MANAGEMENT ============
-        const REQUIRED_CONDITIONS = {
-            TITLE: 'title',
-            IMPORT_DATE: 'import_date',
-            BOXES: 'boxes',
-            ALL_DATES: 'all_dates',
-            QUANTITIES: 'quantities',
-            NO_DUPLICATES: 'no_duplicates'
-        };
-
-        let validationState = {
-            [REQUIRED_CONDITIONS.TITLE]: false,
-            [REQUIRED_CONDITIONS.IMPORT_DATE]: false,
-            [REQUIRED_CONDITIONS.BOXES]: false,
-            [REQUIRED_CONDITIONS.ALL_DATES]: false,
-            [REQUIRED_CONDITIONS.QUANTITIES]: false,
-            [REQUIRED_CONDITIONS.NO_DUPLICATES]: false
-        };
-
-        let boxRowIndex = <?php echo (is_array($boxes) ? count($boxes) : 0); ?>;
-
-        // ============ SUBMIT BUTTON CONTROL ============
-        function disableAllSubmitButtons() {
-            const submitButtons = document.querySelectorAll([
-                '#publish',
-                '#save-post', 
-                'input[name="publish"]',
-                'input[name="save"]',
-                '.editor-post-publish-button',
-                '#publishing-action input[type="submit"]',
-                '#publishing-action .button-primary',
-                '#submitdiv input[type="submit"]',
-                '.button-primary[type="submit"]'
-            ].join(','));
+        // ============ VALIDATION MANAGER ============
+        const ValidationManager = {
+            conditions: {
+                TITLE: 'title', IMPORT_DATE: 'import_date', BOXES: 'boxes',
+                ALL_DATES: 'all_dates', QUANTITIES: 'quantities', NO_DUPLICATES: 'no_duplicates',
+                DATABASE_VALID: 'database_valid', PRODUCTS_NOT_ASSIGNED: 'products_not_assigned'
+            },
             
-            submitButtons.forEach(button => {
-                if (button) {
-                    button.disabled = true;
-                    button.classList.add('submit-button-disabled');
-                    button.title = 'Vui lòng nhập đầy đủ thông tin bắt buộc để có thể cập nhật';
-                }
-            });
-        }
+            state: {},
+            cache: { boxes: {}, products: {}, productAssignments: {} },
+            boxRowIndex: <?php echo (is_array($boxes) ? count($boxes) : 0); ?>,
+            
+            init() {
+                Object.keys(this.conditions).forEach(key => this.state[this.conditions[key]] = false);
+                this.setupEventListeners();
+                this.disableSubmitButtons();
+                setTimeout(() => { this.updateStats(); this.updateSummary(); }, 500);
+            },
 
-        function enableAllSubmitButtons() {
-            const submitButtons = document.querySelectorAll([
-                '#publish',
-                '#save-post', 
-                'input[name="publish"]',
-                'input[name="save"]',
-                '.editor-post-publish-button',
-                '#publishing-action input[type="submit"]',
-                '#publishing-action .button-primary',
-                '#submitdiv input[type="submit"]',
-                '.button-primary[type="submit"]'
-            ].join(','));
-            
-            submitButtons.forEach(button => {
-                if (button) {
-                    button.disabled = false;
-                    button.classList.remove('submit-button-disabled');
-                    button.title = 'Có thể cập nhật';
-                }
-            });
-        }
-
-        // ============ VALIDATION FUNCTIONS ============
-        function validateTitle() {
-            const titleInput = document.getElementById('title');
-            const isValid = titleInput && titleInput.value.trim().length > 0;
-            
-            validationState[REQUIRED_CONDITIONS.TITLE] = isValid;
-            
-            if (titleInput) {
-                if (isValid) {
-                    titleInput.style.borderColor = '#28a745';
-                    titleInput.style.backgroundColor = '#f8fff8';
-                } else {
-                    titleInput.style.borderColor = '#dc3545';
-                    titleInput.style.backgroundColor = '#fff5f5';
-                }
-            }
-            
-            return isValid;
-        }
-
-        function validateImportDate() {
-            const importDateInput = document.getElementById('import_date');
-            const isValid = importDateInput && importDateInput.value.trim().length > 0;
-            
-            validationState[REQUIRED_CONDITIONS.IMPORT_DATE] = isValid;
-            
-            if (importDateInput) {
-                if (isValid) {
-                    importDateInput.style.borderColor = '#28a745';
-                    importDateInput.style.backgroundColor = '#f8fff8';
-                } else {
-                    importDateInput.style.borderColor = '#dc3545';
-                    importDateInput.style.backgroundColor = '#fff5f5';
-                }
-            }
-            
-            return isValid;
-        }
-
-        function validateDateInput(index) {
-            const dateInput = document.querySelector(`[name="import_check_boxes[${index}][lot_date]"]`);
-            if (!dateInput) return false;
-
-            const dateValue = dateInput.value.trim();
-            
-            if (!dateValue) {
-                dateInput.classList.add('required-field');
-                dateInput.classList.remove('valid-field');
-                dateInput.title = 'Date là bắt buộc';
-                return false;
-            } else {
-                dateInput.classList.remove('required-field');
-                dateInput.classList.add('valid-field');
-                dateInput.title = 'Date hợp lệ';
-                return true;
-            }
-        }
-
-        function validateBoxes() {
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            let hasValidBox = false;
-            let allQuantitiesMatch = true;
-            let allDatesValid = true;
-            
-            allRows.forEach((row, index) => {
-                const boxCodeInput = row.querySelector('input[name*="[box_code]"]');
-                const quantityInput = row.querySelector('input[name*="[product_quantity]"]');
-                const productCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                const dateInput = row.querySelector('input[name*="[lot_date]"]');
-
-                if (!boxCodeInput || !quantityInput || !productCodesInput || !dateInput) return;
-
-                const boxCode = boxCodeInput.value.trim();
-                const expectedQuantity = parseInt(quantityInput.value) || 0;
-                const productCodes = productCodesInput.value.trim();
-                const dateValue = dateInput.value.trim();
-
-                // Kiểm tra nếu row có thông tin
-                if (boxCode || expectedQuantity > 0 || productCodes) {
-                    // Kiểm tra đầy đủ thông tin
-                    if (boxCode && expectedQuantity > 0 && productCodes && dateValue) {
-                        // Kiểm tra số lượng khớp
-                        const productCodesList = productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                        const actualQuantity = productCodesList.length;
-                        
-                        if (expectedQuantity === actualQuantity) {
-                            hasValidBox = true;
-                        } else {
-                            allQuantitiesMatch = false;
-                        }
-                    } else {
-                        allQuantitiesMatch = false;
-                    }
-                    
-                    // Kiểm tra date
-                    if (!dateValue) {
-                        allDatesValid = false;
-                    }
-                }
-            });
-            
-            validationState[REQUIRED_CONDITIONS.BOXES] = hasValidBox;
-            validationState[REQUIRED_CONDITIONS.ALL_DATES] = allDatesValid;
-            validationState[REQUIRED_CONDITIONS.QUANTITIES] = allQuantitiesMatch;
-            
-            return { hasValidBox, allQuantitiesMatch, allDatesValid };
-        }
-
-        function validateDuplicates() {
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            let hasInternalDuplicates = false;
-            let hasExternalDuplicates = false;
-            
-            allRows.forEach((row, index) => {
-                const boxCodeInput = row.querySelector('input[name*="[box_code]"]');
-                const productCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
+            async checkAll() {
+                const summaryDiv = document.getElementById('validation-summary');
+                const button = document.getElementById('check_all_validations');
                 
-                if (boxCodeInput) {
-                    const boxCode = boxCodeInput.value.trim();
-                    const duplicateBoxes = checkDuplicateBoxCodes(index, [boxCode]);
-                    if (duplicateBoxes.length > 0) {
-                        hasExternalDuplicates = true;
-                    }
-                }
+                button.disabled = true;
+                button.innerHTML = '⏳ Đang kiểm tra...';
                 
-                if (productCodesInput) {
-                    const productCodes = productCodesInput.value.trim();
-                    const productCodesList = productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                    
-                    // Check internal duplicates
-                    const internalDuplicates = checkInternalDuplicates(productCodesList);
-                    if (internalDuplicates.length > 0) {
-                        hasInternalDuplicates = true;
-                    }
-                    
-                    // Check external duplicates
-                    const duplicateProducts = checkDuplicateProductCodes(index, productCodesList);
-                    if (duplicateProducts.length > 0) {
-                        hasExternalDuplicates = true;
-                    }
-                }
-            });
-            
-            const noDuplicates = !hasInternalDuplicates && !hasExternalDuplicates;
-            validationState[REQUIRED_CONDITIONS.NO_DUPLICATES] = noDuplicates;
-            
-            return noDuplicates;
-        }
-
-        function validateAllRequiredFields() {
-            // Validate từng field
-            validateTitle();
-            validateImportDate();
-            validateBoxes();
-            validateDuplicates();
-            
-            // Kiểm tra tất cả conditions
-            const allValid = Object.values(validationState).every(isValid => isValid === true);
-            
-            // Cập nhật submit button state
-            if (allValid) {
-                enableAllSubmitButtons();
-            } else {
-                disableAllSubmitButtons();
-            }
-            
-            // Cập nhật validation summary
-            updateValidationSummary();
-            
-            return allValid;
-        }
-
-        // ============ VALIDATION SUMMARY ============
-        function updateValidationSummary() {
-            const summaryElement = document.getElementById('validation-summary');
-            const listElement = document.getElementById('validation-list');
-            
-            const invalidConditions = [];
-            
-            if (!validationState[REQUIRED_CONDITIONS.TITLE]) {
-                invalidConditions.push('❌ Tiêu đề bài viết');
-            }
-            if (!validationState[REQUIRED_CONDITIONS.IMPORT_DATE]) {
-                invalidConditions.push('❌ Ngày giờ nhập');
-            }
-            if (!validationState[REQUIRED_CONDITIONS.BOXES]) {
-                invalidConditions.push('❌ Ít nhất 1 thùng hàng hợp lệ');
-            }
-            if (!validationState[REQUIRED_CONDITIONS.ALL_DATES]) {
-                invalidConditions.push('❌ Tất cả Date thùng hàng');
-            }
-            if (!validationState[REQUIRED_CONDITIONS.QUANTITIES]) {
-                invalidConditions.push('❌ Số lượng mã khớp');
-            }
-            if (!validationState[REQUIRED_CONDITIONS.NO_DUPLICATES]) {
-                invalidConditions.push('❌ Không có mã trùng lặp');
-            }
-            
-            if (invalidConditions.length === 0) {
-                summaryElement.className = 'validation-summary success';
-                summaryElement.innerHTML = `
-                    <h4>✅ Sẵn sàng cập nhật</h4>
-                    <p>Tất cả thông tin bắt buộc đã được nhập đầy đủ và hợp lệ.</p>
+                // Show checking status
+                summaryDiv.className = 'validation-summary checking';
+                summaryDiv.innerHTML = `
+                    <h4><span class="spinner"></span>Đang kiểm tra dữ liệu...</h4>
+                    <div id="check-progress"></div>
                 `;
-            } else {
-                summaryElement.className = 'validation-summary error';
-                summaryElement.innerHTML = `
-                    <h4>⚠️ Cần nhập thêm thông tin để có thể cập nhật</h4>
-                    <ul>${invalidConditions.map(condition => `<li>${condition}</li>`).join('')}</ul>
-                `;
-            }
-        }
-
-        // ============ SUMMARY STATISTICS ============
-        function updateSummaryStats() {
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            let totalBoxes = 0;
-            let totalActualCodes = 0;
-            let totalExpectedCodes = 0;
-            let validBoxes = 0;
-
-            allRows.forEach((row, index) => {
-                const boxCodeInput = row.querySelector('input[name*="[box_code]"]');
-                const quantityInput = row.querySelector('input[name*="[product_quantity]"]');
-                const productCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                const dateInput = row.querySelector('input[name*="[lot_date]"]');
-
-                if (!boxCodeInput && !quantityInput && !productCodesInput) return;
-
-                const boxCode = boxCodeInput ? boxCodeInput.value.trim() : '';
-                const expectedQuantity = quantityInput ? parseInt(quantityInput.value) || 0 : 0;
-                const productCodes = productCodesInput ? productCodesInput.value.trim() : '';
-                const dateValue = dateInput ? dateInput.value.trim() : '';
-
-                // Chỉ đếm những row có ít nhất một thông tin
-                if (boxCode || expectedQuantity > 0 || productCodes) {
-                    totalBoxes++;
-                    totalExpectedCodes += expectedQuantity;
-
-                    // Đếm số mã thực tế
-                    if (productCodes) {
-                        const productCodesList = productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                        totalActualCodes += productCodesList.length;
-                    }
-
-                    // Kiểm tra box có hợp lệ không
-                    const hasValidInfo = boxCode && productCodes && dateValue && expectedQuantity > 0;
-                    const quantityMatch = expectedQuantity > 0 && productCodes && 
-                                        expectedQuantity === productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code).length;
+                
+                const progressDiv = document.getElementById('check-progress');
+                let allValid = true;
+                
+                try {
+                    // Step 1: Basic validations
+                    this.addCheckStep(progressDiv, 'checking', '<span class="spinner"></span>Kiểm tra tiêu đề và ngày nhập...');
                     
-                    if (hasValidInfo && quantityMatch) {
-                        validBoxes++;
+                    const titleValid = this.validateField('title');
+                    const dateValid = this.validateField('import_date');
+                    
+                    this.updateLastCheckStep(progressDiv, titleValid && dateValid ? 'success' : 'error', 
+                        titleValid && dateValid ? '✅ Tiêu đề và ngày nhập hợp lệ' : '❌ Tiêu đề hoặc ngày nhập chưa hợp lệ');
+                    
+                    if (!titleValid || !dateValid) allValid = false;
+
+                    // Step 2: Box validation
+                    this.addCheckStep(progressDiv, 'checking', '<span class="spinner"></span>Kiểm tra thông tin thùng hàng...');
+                    
+                    const boxValidation = this.validateBoxes();
+                    let boxMessage = '';
+                    
+                    if (!boxValidation.hasValidBox) {
+                        boxMessage += '❌ Chưa có thùng hàng hợp lệ. ';
+                        allValid = false;
                     }
+                    if (!boxValidation.allDatesValid) {
+                        boxMessage += '❌ Một số thùng chưa nhập Date. ';
+                        allValid = false;
+                    }
+                    if (!boxValidation.allQuantitiesMatch) {
+                        boxMessage += '⚠️ Số lượng mã không khớp ở một số thùng. ';
+                        allValid = false;
+                    }
+                    
+                    if (!boxMessage) boxMessage = '✅ Tất cả thùng hàng hợp lệ';
+                    
+                    this.updateLastCheckStep(progressDiv, allValid ? 'success' : 'error', boxMessage);
+
+                    // Step 3: Duplicates check
+                    this.addCheckStep(progressDiv, 'checking', '<span class="spinner"></span>Kiểm tra mã trùng lặp...');
+                    
+                    const noDuplicates = await this.checkDuplicates();
+                    if (noDuplicates) {
+                        this.updateLastCheckStep(progressDiv, 'success', '✅ Không có mã trùng lặp');
+                    }
+                    
+                    if (!noDuplicates) allValid = false;
+
+                    // Step 4: Database existence check
+                    this.addCheckStep(progressDiv, 'checking', '<span class="spinner"></span>Kiểm tra tồn tại trong cơ sở dữ liệu...');
+                    
+                    const dbValid = await this.checkDatabase();
+                    this.updateLastCheckStep(progressDiv, dbValid ? 'success' : 'error', 
+                        dbValid ? '✅ Tất cả mã tồn tại và chưa được sử dụng' : '❌ Có mã không tồn tại hoặc đã được sử dụng');
+                    
+                    if (!dbValid) allValid = false;
+
+                    // Step 5: Product assignment check
+                    this.addCheckStep(progressDiv, 'checking', '<span class="spinner"></span>Kiểm tra mã sản phẩm chưa thuộc thùng nào...');
+                    
+                    const productsNotAssigned = await this.checkProductAssignment();
+                    if (productsNotAssigned) {
+                        this.updateLastCheckStep(progressDiv, 'success', '✅ Tất cả mã sản phẩm chưa thuộc thùng nào');
+                    }
+                    if (!productsNotAssigned) allValid = false;
+
+                    this.state[this.conditions.DATABASE_VALID] = dbValid;
+                    this.state[this.conditions.PRODUCTS_NOT_ASSIGNED] = productsNotAssigned;
+
+                    // Final update
+                    this.updateStats();
+                    allValid ? this.enableSubmitButtons() : this.disableSubmitButtons();
+
+                    // Show final result
+                    setTimeout(() => {
+                        this.showFinalResult(allValid, progressDiv);
+                        document.getElementById('last-check-time').textContent = `Lần kiểm tra cuối: ${new Date().toLocaleTimeString('vi-VN')}`;
+                    }, 500);
+
+                } catch (error) {
+                    console.error('Validation error:', error);
+                    this.addCheckStep(progressDiv, 'error', '❌ Có lỗi xảy ra khi kiểm tra. Vui lòng thử lại.');
+                    allValid = false;
                 }
-            });
 
-            // Cập nhật hiển thị
-            document.getElementById('total-boxes').textContent = totalBoxes;
-            document.getElementById('total-codes').textContent = totalActualCodes;
-            document.getElementById('expected-codes').textContent = totalExpectedCodes;
+                button.disabled = false;
+                button.innerHTML = '🔍 <strong>Kiểm tra tất cả</strong>';
+                return allValid;
+            },
 
-            // Cập nhật trạng thái khớp
-            const matchStatusElement = document.getElementById('match-status');
-            if (totalBoxes === 0) {
-                matchStatusElement.textContent = '-';
-                matchStatusElement.style.color = '#666';
-            } else if (validBoxes === totalBoxes && totalActualCodes === totalExpectedCodes) {
-                matchStatusElement.textContent = '100%';
-                matchStatusElement.style.color = '#28a745';
-            } else {
-                const percentage = totalBoxes > 0 ? Math.round((validBoxes / totalBoxes) * 100) : 0;
-                matchStatusElement.textContent = percentage + '%';
-                matchStatusElement.style.color = percentage < 100 ? '#dc3545' : '#28a745';
-            }
-        }
+            addCheckStep(container, type, message) {
+                const step = document.createElement('div');
+                step.className = `check-step ${type}`;
+                step.innerHTML = message;
+                container.appendChild(step);
+                
+                // Auto scroll to bottom
+                container.scrollTop = container.scrollHeight;
+            },
 
-        // ============ BOX DISPLAY UPDATE ============
-        function updateBoxDisplay(index) {
-            const productCodesInput = document.querySelector(`[name="import_check_boxes[${index}][product_codes]"]`);
-            const boxCodeInput = document.querySelector(`[name="import_check_boxes[${index}][box_code]"]`);
-            const quantityInput = document.querySelector(`[name="import_check_boxes[${index}][product_quantity]"]`);
-            const dateInput = document.querySelector(`[name="import_check_boxes[${index}][lot_date]"]`);
-            const statusDiv = document.getElementById(`box_status_${index}`);
-            const messageDiv = document.getElementById(`box_message_${index}`);
+            updateLastCheckStep(container, type, message) {
+                const lastStep = container.lastElementChild;
+                if (lastStep) {
+                    lastStep.className = `check-step ${type}`;
+                    lastStep.innerHTML = message;
+                }
+            },
 
-            if (!productCodesInput || !boxCodeInput || !quantityInput || !statusDiv || !messageDiv) return;
-
-            const productCodes = productCodesInput.value.trim();
-            const boxCode = boxCodeInput.value.trim();
-            const expectedQuantity = parseInt(quantityInput.value) || 0;
-            const dateValue = dateInput ? dateInput.value.trim() : '';
-            
-            // Đếm số mã sản phẩm thực tế
-            const productCodesList = productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-            const actualQuantity = productCodesList.length;
-            
-            // Kiểm tra các lỗi
-            const internalDuplicates = checkInternalDuplicates(productCodesList);
-            const isDateValid = validateDateInput(index);
-            const duplicateBoxes = checkDuplicateBoxCodes(index, [boxCode]);
-            const duplicateProducts = checkDuplicateProductCodes(index, productCodesList);
-            
-            // Tạo thông báo
-            let quantityMessage = '';
-            if (expectedQuantity > 0 || actualQuantity > 0) {
-                if (expectedQuantity === actualQuantity && expectedQuantity > 0) {
-                    quantityMessage = '<span style="color: green; font-weight: bold;">✅ Số lượng khớp (' + actualQuantity + ' mã)</span>';
+            showFinalResult(allValid, progressDiv) {
+                const summaryDiv = document.getElementById('validation-summary');
+                
+                if (allValid) {
+                    summaryDiv.className = 'validation-summary success';
+                    summaryDiv.innerHTML = `
+                        <h4>✅ Kiểm tra hoàn tất - Sẵn sàng cập nhật!</h4>
+                        <p>Tất cả thông tin bắt buộc đã được nhập đầy đủ và hợp lệ.</p>
+                        ${progressDiv.innerHTML}
+                    `;
                 } else {
-                    quantityMessage = '<span style="color: red; font-weight: bold;">❌ Số lượng không khớp</span><br>' +
-                                    '<small>Dự kiến: ' + expectedQuantity + ' | Thực tế: ' + actualQuantity + '</small>';
+                    summaryDiv.className = 'validation-summary error';
+                    const invalidConditions = this.getInvalidConditions();
+                    summaryDiv.innerHTML = `
+                        <h4>❌ Có lỗi cần sửa trước khi cập nhật</h4>
+                        <p><strong>Các vấn đề cần khắc phục:</strong></p>
+                        <ul>${invalidConditions.map(condition => `<li>${condition}</li>`).join('')}</ul>
+                        <div style="margin-top: 15px;">
+                            <summary style="cursor: pointer; font-weight: bold;">Chi tiết quá trình kiểm tra</summary>
+                            <div style="margin-top: 10px;">${progressDiv.innerHTML}</div>
+                        </div>
+                    `;
                 }
-            }
+            },
 
-            if (!isDateValid) {
-                quantityMessage += '<br><span style="color: #e74c3c; font-weight: bold;">⚠️ Date là bắt buộc</span>';
-            } else {
-                quantityMessage += '<br><span style="color: #28a745; font-weight: bold;">✅ Date hợp lệ</span>';
-            }
-            
-            // Highlight duplicates
-            if (internalDuplicates.length > 0) {
-                quantityMessage += '<br><span style="color: #e74c3c; font-weight: bold;">⚠️ Mã trùng trong thùng:</span><br>' +
-                                '<small style="color: #e74c3c;">' + internalDuplicates.join(', ') + '</small>';
-                productCodesInput.style.borderColor = '#e74c3c';
-                productCodesInput.style.backgroundColor = '#ffeaa7';
-                productCodesInput.style.borderWidth = '2px';
-            } else if (duplicateProducts.length === 0) {
-                productCodesInput.style.borderColor = '';
-                productCodesInput.style.backgroundColor = '';
-                productCodesInput.style.borderWidth = '';
-            }
-            
-            if (duplicateBoxes.length > 0) {
-                quantityMessage += '<br><span style="color: red; font-weight: bold;">⚠️ Mã thùng bị trùng:</span><br>' +
-                                '<small style="color: #d63031;">' + duplicateBoxes.join(', ') + '</small>';
-            }
-            
-            if (duplicateProducts.length > 0) {
-                quantityMessage += '<br><span style="color: red; font-weight: bold;">⚠️ Mã sản phẩm bị trùng:</span><br>' +
-                                '<small style="color: #d63031;">' + duplicateProducts.join(', ') + '</small>';
-                productCodesInput.style.borderColor = 'red';
-                productCodesInput.style.backgroundColor = '#ffe6e6';
-            }
-            
-            // Hiển thị trạng thái
-            let statusMessage = '';
-            if (boxCode && productCodes && dateValue) {
-                const hasErrors = internalDuplicates.length > 0 || duplicateBoxes.length > 0 || duplicateProducts.length > 0;
-                const quantityMismatch = expectedQuantity > 0 && expectedQuantity !== actualQuantity;
+            getInvalidConditions() {
+                const conditionLabels = {
+                    [this.conditions.TITLE]: '❌ Tiêu đề bài viết',
+                    [this.conditions.IMPORT_DATE]: '❌ Ngày giờ nhập',
+                    [this.conditions.BOXES]: '❌ Ít nhất 1 thùng hàng hợp lệ',
+                    [this.conditions.ALL_DATES]: '❌ Tất cả Date thùng hàng',
+                    [this.conditions.QUANTITIES]: '❌ Số lượng mã khớp',
+                    [this.conditions.NO_DUPLICATES]: '❌ Không có mã trùng lặp',
+                    [this.conditions.DATABASE_VALID]: '❌ Tất cả mã phải tồn tại trong cơ sở dữ liệu với trạng thái "chưa sử dụng"',
+                    [this.conditions.PRODUCTS_NOT_ASSIGNED]: '❌ Tất cả mã sản phẩm phải chưa thuộc thùng nào'
+                };
                 
-                if (hasErrors || quantityMismatch) {
-                    statusMessage = '<span style="color: #e74c3c;">❌ Có lỗi cần sửa</span>';
-                } else {
-                    statusMessage = '<span style="color: green;">✅ Hoàn thành</span>';
-                }
-            } else {
-                let missingFields = [];
-                if (!boxCode) missingFields.push('mã thùng');
-                if (!productCodes) missingFields.push('mã sản phẩm');
-                if (!dateValue) missingFields.push('date');
-                
-                statusMessage = '<span style="color: orange;">⚠️ Chưa nhập: ' + missingFields.join(', ') + '</span>';
-            }
-            
-            statusDiv.innerHTML = statusMessage;
-            messageDiv.innerHTML = quantityMessage || '<em style="color: #666;">Nhập thông tin để kiểm tra</em>';
-        }
-
-        // ============ DUPLICATE CHECK FUNCTIONS ============
-        function checkInternalDuplicates(productCodesList) {
-            const seen = {};
-            const duplicates = [];
-            
-            productCodesList.forEach(code => {
-                if (code && code.trim()) {
-                    const trimmedCode = code.trim();
-                    if (seen[trimmedCode]) {
-                        if (!duplicates.includes(trimmedCode)) {
-                            duplicates.push(trimmedCode);
-                        }
-                    } else {
-                        seen[trimmedCode] = true;
-                    }
-                }
-            });
-            
-            return duplicates;
-        }
-
-        function checkDuplicateBoxCodes(currentIndex, currentBoxCodes) {
-            const duplicates = [];
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            
-            allRows.forEach((row, index) => {
-                if (index === currentIndex) return;
-                
-                const otherBoxCodeInput = row.querySelector('input[name*="[box_code]"]');
-                if (!otherBoxCodeInput) return;
-                
-                const otherBoxCode = otherBoxCodeInput.value.trim();
-                if (!otherBoxCode) return;
-                
-                currentBoxCodes.forEach(code => {
-                    if (code && otherBoxCode === code) {
-                        duplicates.push(code);
-                    }
+                const invalidConditions = [];
+                Object.entries(this.state).forEach(([key, value]) => {
+                    if (!value && conditionLabels[key]) invalidConditions.push(conditionLabels[key]);
                 });
-            });
-            
-            return [...new Set(duplicates)];
-        }
+                
+                return invalidConditions;
+            },
 
-        function checkDuplicateProductCodes(currentIndex, currentProductCodes) {
-            const duplicates = [];
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            
-            allRows.forEach((row, index) => {
-                if (index === currentIndex) return;
+            validateField(fieldId) {
+                const input = document.getElementById(fieldId);
+                const isValid = input && input.value.trim().length > 0;
+                this.state[this.conditions[fieldId.toUpperCase()]] = isValid;
                 
-                const otherProductCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                if (!otherProductCodesInput) return;
-                
-                const otherProductCodes = otherProductCodesInput.value.trim();
-                if (!otherProductCodes) return;
-                
-                const otherProductCodesList = otherProductCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                
-                currentProductCodes.forEach(code => {
-                    if (otherProductCodesList.includes(code)) {
-                        duplicates.push(code);
-                    }
-                });
-            });
-            
-            return [...new Set(duplicates)];
-        }
+                if (input) {
+                    input.style.borderColor = isValid ? '#28a745' : '#dc3545';
+                    input.style.backgroundColor = isValid ? '#f8fff8' : '#fff5f5';
+                }
+                return isValid;
+            },
 
-        function checkAllBoxDuplicates() {
-            const allRows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            let hasDuplicates = false;
-            
-            allRows.forEach((row, index) => {
-                const boxCodeInput = row.querySelector('input[name*="[box_code]"]');
-                const productCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
+            validateBoxes() {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                let hasValidBox = false, allQuantitiesMatch = true, allDatesValid = true, hasAnyBox = false;
                 
-                if (boxCodeInput || productCodesInput) {
-                    let hasError = false;
+                rows.forEach((row, index) => {
+                    const inputs = this.getRowInputs(row);
+                    if (!inputs.all) return;
+
+                    const values = this.getRowValues(inputs);
                     
-                    if (boxCodeInput) {
-                        const boxCode = boxCodeInput.value.trim();
-                        const duplicateBoxes = checkDuplicateBoxCodes(index, [boxCode]);
-                        if (duplicateBoxes.length > 0) {
-                            hasError = true;
-                            boxCodeInput.style.borderColor = 'red';
-                            boxCodeInput.style.backgroundColor = '#ffe6e6';
-                        } else {
-                            boxCodeInput.style.borderColor = '';
-                            boxCodeInput.style.backgroundColor = '';
-                        }
-                    }
+                    // Kiểm tra nếu row có bất kỳ thông tin nào (kể cả không đầy đủ)
+                    const hasAnyData = values.boxCode || values.productCodes || values.expectedQuantity > 0 || values.dateValue;
                     
-                    if (productCodesInput) {
-                        const productCodes = productCodesInput.value.trim();
-                        const productCodesList = productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
+                    if (hasAnyData) {
+                        hasAnyBox = true;
                         
-                        const internalDuplicates = checkInternalDuplicates(productCodesList);
-                        const hasInternalDuplicates = internalDuplicates.length > 0;
+                        // Kiểm tra thông tin đầy đủ và hợp lệ
+                        const hasCompleteInfo = values.boxCode && values.productCodes && values.dateValue;
                         
-                        const duplicateProducts = checkDuplicateProductCodes(index, productCodesList);
-                        const hasExternalDuplicates = duplicateProducts.length > 0;
-                        
-                        if (hasInternalDuplicates || hasExternalDuplicates) {
-                            hasError = true;
-                            productCodesInput.style.borderWidth = '2px';
+                        if (hasCompleteInfo) {
+                            const productCodesList = this.parseProductCodes(values.productCodes);
                             
-                            if (hasInternalDuplicates && hasExternalDuplicates) {
-                                productCodesInput.style.borderColor = '#8e44ad';
-                                productCodesInput.style.backgroundColor = '#f8f0ff';
-                            } else if (hasInternalDuplicates) {
-                                productCodesInput.style.borderColor = '#e74c3c';
-                                productCodesInput.style.backgroundColor = '#ffeaa7';
-                            } else {
-                                productCodesInput.style.borderColor = 'red';
-                                productCodesInput.style.backgroundColor = '#ffe6e6';
+                            if (values.expectedQuantity > 0) {
+                                if (values.expectedQuantity === productCodesList.length) {
+                                    hasValidBox = true;
+                                } else {
+                                    allQuantitiesMatch = false;
+                                }
+                            } else if (productCodesList.length > 0) {
+                                hasValidBox = true;
                             }
                         } else {
-                            productCodesInput.style.borderColor = '';
-                            productCodesInput.style.backgroundColor = '';
-                            productCodesInput.style.borderWidth = '';
+                            // Có dữ liệu nhưng không đầy đủ
+                            if (!values.dateValue) allDatesValid = false;
+                            if (!values.boxCode || !values.productCodes) {
+                                // Không đủ thông tin cơ bản để coi là valid
+                            }
                         }
                     }
                     
-                    if (hasError) {
-                        hasDuplicates = true;
+                    this.updateBoxDisplay(index);
+                });
+
+                // Nếu không có dữ liệu gì hoặc không có box nào valid
+                if (!hasAnyBox) {
+                    hasValidBox = false;
+                }
+                
+                this.state[this.conditions.BOXES] = hasValidBox;
+                this.state[this.conditions.ALL_DATES] = allDatesValid;
+                this.state[this.conditions.QUANTITIES] = allQuantitiesMatch;
+                
+                return { hasValidBox, allQuantitiesMatch, allDatesValid };
+            },
+
+            async checkDuplicates() {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                let hasDuplicates = false;
+                let duplicateDetails = [];
+                let duplicateRowIndices = new Set();
+                
+                // Clear previous highlighting
+                this.clearAllDuplicateHighlighting();
+                
+                rows.forEach((row, index) => {
+                    const inputs = this.getRowInputs(row);
+                    if (!inputs.all) return;
+
+                    const values = this.getRowValues(inputs);
+                    
+                    // Check duplicate box codes
+                    if (values.boxCode) {
+                        const duplicateBoxes = this.findDuplicateBoxCodes(index, [values.boxCode]);
+                        if (duplicateBoxes.length > 0) {
+                            hasDuplicates = true;
+                            this.markFieldError(inputs.boxCode);
+                            
+                            // Tìm các dòng khác có cùng mã thùng
+                            const conflictRows = this.findRowsWithBoxCode(values.boxCode, index);
+                            
+                            // Highlight current row và conflict rows
+                            duplicateRowIndices.add(index);
+                            conflictRows.forEach(rowNum => duplicateRowIndices.add(rowNum - 1));
+                            
+                            duplicateDetails.push({
+                                type: 'box',
+                                code: values.boxCode,
+                                currentRow: index + 1,
+                                conflictRows: conflictRows,
+                                message: `Mã thùng "${values.boxCode}" bị trùng`
+                            });
+                        } else {
+                            this.clearFieldError(inputs.boxCode);
+                        }
                     }
                     
-                    updateBoxDisplay(index);
-                }
-            });
-            
-            return hasDuplicates;
-        }
-
-        // ============ EVENT HANDLERS ============
-        function initBoxRowEventListeners(index) {
-            const productCodesInput = document.querySelector(`[name="import_check_boxes[${index}][product_codes]"]`);
-            const boxCodeInput = document.querySelector(`[name="import_check_boxes[${index}][box_code]"]`);
-            const quantityInput = document.querySelector(`[name="import_check_boxes[${index}][product_quantity]"]`);
-            const dateInput = document.querySelector(`[name="import_check_boxes[${index}][lot_date]"]`);
-            
-            if (productCodesInput) {
-                productCodesInput.addEventListener("input", function() {
-                    updateBoxDisplay(index);
-                    updateSummaryStats();
-                    validateAllRequiredFields();
-                });
-            }
-            
-            if (boxCodeInput) {
-                boxCodeInput.addEventListener("input", function() {
-                    updateBoxDisplay(index);
-                    updateSummaryStats();
-                    validateAllRequiredFields();
-                });
-            }
-            
-            if (quantityInput) {
-                quantityInput.addEventListener("input", function() {
-                    updateBoxDisplay(index);
-                    updateSummaryStats();
-                    validateAllRequiredFields();
-                });
-            }
-
-            if (dateInput) {
-                dateInput.addEventListener("change", function() {
-                    validateDateInput(index);
-                    updateBoxDisplay(index);
-                    updateSummaryStats();
-                    validateAllRequiredFields();
-                });
-                // Validate ngay khi load
-                validateDateInput(index);
-            }
-        }
-
-        function checkAllBoxQuantities() {
-            const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
-            
-            rows.forEach(function(row, index) {
-                updateBoxDisplay(index);
-            });
-            
-            updateSummaryStats();
-            validateAllRequiredFields();
-            alert('Đã kiểm tra xong tất cả số lượng!');
-        }
-
-        // ============ MAIN EVENT LISTENERS ============
-        document.getElementById("add_box_row").addEventListener("click", function() {
-            let tableBody = document.querySelector("#import_check_boxes_table tbody");
-            let row = document.createElement("tr");
-
-            row.innerHTML = `<?php echo str_replace(["\n", "'"], ["", "\\'"], render_import_box_row()); ?>`.replace(/__index__/g, boxRowIndex);
-            tableBody.appendChild(row);
-            boxRowIndex++;
-            
-            initBoxRowEventListeners(boxRowIndex - 1);
-            updateSummaryStats();
-            validateAllRequiredFields();
-        });
-
-        document.addEventListener("click", function(e) {
-            if (e.target.classList.contains("remove-box-row")) {
-                e.target.closest("tr").remove();
-                updateSummaryStats();
-                validateAllRequiredFields();
-            }
-        });
-
-        document.getElementById("check_box_quantities").addEventListener("click", function() {
-            checkAllBoxQuantities();
-        });
-
-        document.getElementById("check_box_duplicates").addEventListener("click", function() {
-            const hasDuplicates = checkAllBoxDuplicates();
-            if (hasDuplicates) {
-                alert('❌ Phát hiện mã thùng hoặc mã sản phẩm bị trùng lặp! Vui lòng kiểm tra các ô được highlight.');
-            } else {
-                alert('✅ Không có mã nào bị trùng lặp!');
-            }
-            validateAllRequiredFields();
-        });
-
-        document.getElementById("refresh_summary").addEventListener("click", function() {
-            updateSummaryStats();
-            validateAllRequiredFields();
-            alert('📊 Đã cập nhật tổng kết!');
-        });
-
-        // ============ FORM VALIDATION SETUP ============
-        function initFormValidation() {
-            // Validate title
-            const titleInput = document.getElementById('title');
-            if (titleInput) {
-                titleInput.addEventListener('input', validateAllRequiredFields);
-                titleInput.addEventListener('blur', validateAllRequiredFields);
-            }
-            
-            // Validate import date
-            const importDateInput = document.getElementById('import_date');
-            if (importDateInput) {
-                importDateInput.addEventListener('change', validateAllRequiredFields);
-                importDateInput.addEventListener('blur', validateAllRequiredFields);
-            }
-
-            // Initialize existing box rows
-            document.querySelectorAll(".product-codes-input").forEach(function(input, index) {
-                initBoxRowEventListeners(index);
-            });
-        }
-
-        // ============ FORM SUBMIT PREVENTION ============
-        function preventInvalidSubmit() {
-            const form = document.getElementById('post');
-            if (form) {
-                form.addEventListener('submit', function(e) {
-                    const isValid = validateAllRequiredFields();
-                    if (!isValid) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        alert('❌ Vui lòng nhập đầy đủ thông tin bắt buộc trước khi cập nhật!');
-                        return false;
+                    // Check duplicate product codes
+                    if (values.productCodes) {
+                        const productCodesList = this.parseProductCodes(values.productCodes);
+                        
+                        // Check internal duplicates (trong cùng 1 dòng)
+                        const internalDups = this.findInternalDuplicates(productCodesList);
+                        
+                        // Check external duplicates (với các dòng khác)
+                        const externalDups = this.findDuplicateProductCodes(index, productCodesList);
+                        
+                        if (internalDups.length > 0) {
+                            hasDuplicates = true;
+                            this.markFieldError(inputs.productCodes, '#ffeaa7');
+                            
+                            // Highlight current row
+                            duplicateRowIndices.add(index);
+                            
+                            duplicateDetails.push({
+                                type: 'product_internal',
+                                codes: internalDups,
+                                currentRow: index + 1,
+                                message: `Mã sản phẩm trùng lặp trong cùng dòng ${index + 1}: ${internalDups.join(', ')}`
+                            });
+                        }
+                        
+                        if (externalDups.length > 0) {
+                            hasDuplicates = true;
+                            this.markFieldError(inputs.productCodes, '#ffeaa7');
+                            
+                            // Tìm các dòng khác có cùng mã sản phẩm
+                            const productConflicts = this.findRowsWithProductCodes(externalDups, index);
+                            
+                            // Highlight current row và conflict rows
+                            duplicateRowIndices.add(index);
+                            Object.values(productConflicts).forEach(conflictRows => {
+                                conflictRows.forEach(rowNum => duplicateRowIndices.add(rowNum - 1));
+                            });
+                            
+                            externalDups.forEach(code => {
+                                const conflictRows = productConflicts[code] || [];
+                                duplicateDetails.push({
+                                    type: 'product_external',
+                                    code: code,
+                                    currentRow: index + 1,
+                                    conflictRows: conflictRows,
+                                    message: `Mã sản phẩm "${code}" bị trùng`
+                                });
+                            });
+                        }
+                        
+                        if (internalDups.length === 0 && externalDups.length === 0) {
+                            this.clearFieldError(inputs.productCodes);
+                        }
                     }
                 });
-            }
-
-            // Intercept all click events on submit buttons
-            document.addEventListener('click', function(e) {
-                const isSubmitButton = e.target.matches([
-                    '#publish',
-                    '#save-post', 
-                    'input[name="publish"]',
-                    'input[name="save"]',
-                    '.editor-post-publish-button',
-                    '#publishing-action input[type="submit"]',
-                    '#publishing-action .button-primary',
-                    '#submitdiv input[type="submit"]',
-                    '.button-primary[type="submit"]'
-                ].join(','));
-
-                if (isSubmitButton && e.target.disabled) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    alert('❌ Vui lòng nhập đầy đủ thông tin bắt buộc trước khi cập nhật!');
-                    return false;
+                
+                // Highlight tất cả các dòng bị trùng
+                this.highlightDuplicateRows(Array.from(duplicateRowIndices));
+                
+                this.state[this.conditions.NO_DUPLICATES] = !hasDuplicates;
+                
+                // Hiển thị chi tiết lỗi trùng lặp
+                if (hasDuplicates && duplicateDetails.length > 0) {
+                    this.showDuplicateDetails(duplicateDetails);
                 }
-            }, true);
-        }
+                
+                return !hasDuplicates;
+            },
 
-        // ============ INITIALIZATION ============
-        function initializeValidation() {
-            // Disable all submit buttons immediately
-            disableAllSubmitButtons();
-            
-            // Initialize form validation
-            initFormValidation();
-            
-            // Set up submit prevention
-            preventInvalidSubmit();
-            
-            // Initial validation check
-            setTimeout(() => {
-                updateSummaryStats();
-                validateAllRequiredFields();
-            }, 500);
-        }
+            clearAllDuplicateHighlighting() {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                rows.forEach(row => {
+                    row.classList.remove('duplicate-row');
+                });
+            },
 
-        // ============ DOM READY HANDLERS ============
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeValidation();
-            
-            // Observer for dynamically added submit buttons
-            const observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.addedNodes.length > 0) {
-                        const hasSubmitButton = Array.from(mutation.addedNodes).some(node => {
-                            return node.nodeType === 1 && node.matches && (
-                                node.matches('#publish') ||
-                                node.matches('#save-post') ||
-                                node.matches('input[name="publish"]') ||
-                                node.matches('input[name="save"]') ||
-                                node.matches('.button-primary[type="submit"]')
-                            );
+            highlightDuplicateRows(rowIndices) {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                
+                rowIndices.forEach(index => {
+                    if (rows[index]) {
+                        rows[index].classList.add('duplicate-row');
+                        
+                        // Scroll to first duplicate row để user dễ thấy
+                        if (index === Math.min(...rowIndices)) {
+                            setTimeout(() => {
+                                rows[index].scrollIntoView({ 
+                                    behavior: 'smooth', 
+                                    block: 'center' 
+                                });
+                            }, 500);
+                        }
+                    }
+                });
+            },
+
+            findRowsWithBoxCode(boxCode, excludeIndex) {
+                const conflictRows = [];
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                
+                rows.forEach((row, index) => {
+                    if (index === excludeIndex) return;
+                    
+                    const input = row.querySelector('input[name*="[box_code]"]');
+                    if (input && input.value.trim() === boxCode) {
+                        conflictRows.push(index + 1);
+                    }
+                });
+                
+                return conflictRows;
+            },
+
+            findRowsWithProductCodes(productCodes, excludeIndex) {
+                const conflicts = {};
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                
+                // Initialize conflicts object
+                productCodes.forEach(code => {
+                    conflicts[code] = [];
+                });
+                
+                rows.forEach((row, index) => {
+                    if (index === excludeIndex) return;
+                    
+                    const input = row.querySelector('textarea[name*="[product_codes]"]');
+                    if (input && input.value.trim()) {
+                        const otherCodes = this.parseProductCodes(input.value.trim());
+                        
+                        productCodes.forEach(code => {
+                            if (otherCodes.includes(code)) {
+                                conflicts[code].push(index + 1);
+                            }
+                        });
+                    }
+                });
+                
+                return conflicts;
+            },
+
+            showDuplicateDetails(duplicateDetails) {
+                let detailMessage = '❌ Chi tiết mã trùng lặp:<br><br>';
+                
+                // Nhóm lỗi theo loại
+                const boxDuplicates = duplicateDetails.filter(d => d.type === 'box');
+                const productInternalDuplicates = duplicateDetails.filter(d => d.type === 'product_internal');
+                const productExternalDuplicates = duplicateDetails.filter(d => d.type === 'product_external');
+                
+                // Hiển thị lỗi mã thùng trùng
+                if (boxDuplicates.length > 0) {
+                    detailMessage += '<div style="margin-bottom: 15px; padding: 10px; background: #fff3cd; border-left: 3px solid #ffc107; border-radius: 3px;">';
+                    detailMessage += '<strong>🗂️ Mã thùng trùng lặp:</strong><br>';
+                    
+                    // Group by box code
+                    const groupedBoxes = {};
+                    boxDuplicates.forEach(dup => {
+                        if (!groupedBoxes[dup.code]) {
+                            groupedBoxes[dup.code] = [];
+                        }
+                        groupedBoxes[dup.code].push(dup.currentRow);
+                        groupedBoxes[dup.code].push(...dup.conflictRows);
+                    });
+                    
+                    Object.entries(groupedBoxes).forEach(([boxCode, rows]) => {
+                        const uniqueRows = [...new Set(rows)].sort((a, b) => a - b);
+                        detailMessage += `<small>• Mã thùng "<strong>${boxCode}</strong>" xuất hiện ở dòng: ${uniqueRows.join(', ')}</small><br>`;
+                    });
+                    
+                    detailMessage += '</div>';
+                }
+                
+                // Hiển thị lỗi mã sản phẩm trùng trong cùng dòng
+                if (productInternalDuplicates.length > 0) {
+                    detailMessage += '<div style="margin-bottom: 15px; padding: 10px; background: #f8d7da; border-left: 3px solid #dc3545; border-radius: 3px;">';
+                    detailMessage += '<strong>🔄 Mã sản phẩm trùng lặp trong cùng dòng:</strong><br>';
+                    
+                    productInternalDuplicates.forEach(dup => {
+                        detailMessage += `<small>• <span style="color: #e74c3c; font-weight: bold;">Dòng ${dup.currentRow}</span>: ${dup.codes.join(', ')}</small><br>`;
+                    });
+                    
+                    detailMessage += '</div>';
+                }
+                
+                // Hiển thị lỗi mã sản phẩm trùng giữa các dòng
+                if (productExternalDuplicates.length > 0) {
+                    detailMessage += '<div style="margin-bottom: 15px; padding: 10px; background: #f8d7da; border-left: 3px solid #dc3545; border-radius: 3px;">';
+                    detailMessage += '<strong>↔️ Mã sản phẩm trùng lặp giữa các dòng:</strong><br>';
+                    
+                    // Group by product code
+                    const groupedProducts = {};
+                    productExternalDuplicates.forEach(dup => {
+                        if (!groupedProducts[dup.code]) {
+                            groupedProducts[dup.code] = [];
+                        }
+                        groupedProducts[dup.code].push(dup.currentRow);
+                        groupedProducts[dup.code].push(...dup.conflictRows);
+                    });
+                    
+                    Object.entries(groupedProducts).forEach(([productCode, rows]) => {
+                        const uniqueRows = [...new Set(rows)].sort((a, b) => a - b);
+                        detailMessage += `<small>• Mã sản phẩm "<strong>${productCode}</strong>" xuất hiện ở <span style="color: #e74c3c; font-weight: bold;">dòng: ${uniqueRows.join(', ')}</span></small><br>`;
+                    });
+                    
+                    detailMessage += '</div>';
+                }
+                detailMessage += '<p style="color: #666; font-style: italic; margin-top: 10px;">💡 Các dòng bị trùng đã được tô đỏ trong bảng để dễ nhận biết.</p>';
+                // Update step với thông tin chi tiết
+                const progressDiv = document.getElementById('check-progress');
+                if (progressDiv && progressDiv.lastElementChild) {
+                    progressDiv.lastElementChild.innerHTML = detailMessage;
+                }
+            },
+
+            async checkDatabase() {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                let allValid = true;
+                let invalidDetails = [];
+                let hasAnyDataToCheck = false;
+                
+                for (let i = 0; i < rows.length; i++) {
+                    const inputs = this.getRowInputs(rows[i]);
+                    if (!inputs.all) continue;
+
+                    const values = this.getRowValues(inputs);
+                    
+                    // Kiểm tra nếu có bất kỳ dữ liệu nào để validate
+                    const hasData = values.boxCode || values.productCodes || values.expectedQuantity > 0 || values.dateValue;
+                    
+                    if (!hasData) {
+                        // Row trống hoàn toàn - clear tất cả styling
+                        this.clearAllFieldStyling(inputs);
+                        continue;
+                    }
+                    
+                    hasAnyDataToCheck = true;
+                    let rowErrors = [];
+                    
+                    try {
+                        // ============ VALIDATE REQUIRED FIELDS ============
+                        
+                        // 1. Validate Box Code - Required
+                        if (!values.boxCode) {
+                            allValid = false;
+                            inputs.boxCode.classList.add('required-field');
+                            inputs.boxCode.classList.remove('valid-field', 'invalid-code');
+                            rowErrors.push('thiếu mã thùng');
+                        } else {
+                            inputs.boxCode.classList.remove('required-field');
+                            
+                            // Check box code in database
+                            const boxStatus = await this.apiCall('check_barcode_status', { type: 'box', codes: [values.boxCode] });
+                            if (boxStatus[values.boxCode]) {
+                                const status = boxStatus[values.boxCode];
+                                this.cache.boxes[values.boxCode] = status;
+                                
+                                if (!status.exists) {
+                                    allValid = false;
+                                    inputs.boxCode.classList.add('invalid-code');
+                                    inputs.boxCode.classList.remove('valid-field');
+                                    rowErrors.push(`mã thùng "${values.boxCode}" không tồn tại trong hệ thống`);
+                                } else if (status.status !== 'unused') {
+                                    allValid = false;
+                                    inputs.boxCode.classList.add('invalid-code');
+                                    inputs.boxCode.classList.remove('valid-field');
+                                    rowErrors.push(`mã thùng "${values.boxCode}" đã được sử dụng (trạng thái: ${status.status})`);
+                                } else {
+                                    inputs.boxCode.classList.add('valid-field');
+                                    inputs.boxCode.classList.remove('invalid-code');
+                                }
+                            } else {
+                                allValid = false;
+                                inputs.boxCode.classList.add('invalid-code');
+                                inputs.boxCode.classList.remove('valid-field');
+                                rowErrors.push(`không thể kiểm tra mã thùng "${values.boxCode}"`);
+                            }
+                        }
+                        
+                        // 2. Validate Product Codes - Required
+                        if (!values.productCodes) {
+                            allValid = false;
+                            inputs.productCodes.classList.add('required-field');
+                            inputs.productCodes.classList.remove('valid-field', 'invalid-code', 'assigned-to-box');
+                            rowErrors.push('thiếu danh sách mã sản phẩm');
+                        } else {
+                            inputs.productCodes.classList.remove('required-field');
+                            
+                            const productCodesList = this.parseProductCodes(values.productCodes);
+                            if (productCodesList.length === 0) {
+                                allValid = false;
+                                inputs.productCodes.classList.add('required-field');
+                                inputs.productCodes.classList.remove('valid-field', 'invalid-code', 'assigned-to-box');
+                                rowErrors.push('danh sách mã sản phẩm trống hoặc không hợp lệ');
+                            } else {
+                                // Check product codes in database
+                                const productStatus = await this.apiCall('check_barcode_status', { type: 'product', codes: productCodesList });
+                                let invalidProducts = [];
+                                let missingProducts = [];
+                                let usedProducts = [];
+                                
+                                for (const code of productCodesList) {
+                                    if (productStatus[code]) {
+                                        const status = productStatus[code];
+                                        this.cache.products[code] = status;
+                                        
+                                        if (!status.exists) {
+                                            missingProducts.push(code);
+                                        } else if (status.status !== 'unused') {
+                                            usedProducts.push(`${code} (${status.status})`);
+                                        }
+                                    } else {
+                                        invalidProducts.push(code);
+                                    }
+                                }
+                                
+                                // Tổng hợp lỗi product codes
+                                let productErrors = [];
+                                if (missingProducts.length > 0) {
+                                    productErrors.push(`không tồn tại: ${missingProducts.join(', ')}`);
+                                }
+                                if (usedProducts.length > 0) {
+                                    productErrors.push(`đã được sử dụng: ${usedProducts.join(', ')}`);
+                                }
+                                if (invalidProducts.length > 0) {
+                                    productErrors.push(`không thể kiểm tra: ${invalidProducts.join(', ')}`);
+                                }
+                                
+                                if (productErrors.length > 0) {
+                                    allValid = false;
+                                    inputs.productCodes.classList.add('invalid-code');
+                                    inputs.productCodes.classList.remove('valid-field');
+                                    rowErrors.push(`mã sản phẩm ${productErrors.join('; ')}`);
+                                } else {
+                                    inputs.productCodes.classList.add('valid-field');
+                                    inputs.productCodes.classList.remove('invalid-code');
+                                }
+                            }
+                        }
+                        
+                        // 3. Validate Date - Required  
+                        if (!values.dateValue) {
+                            allValid = false;
+                            inputs.date.classList.add('required-field');
+                            inputs.date.classList.remove('valid-field');
+                            rowErrors.push('thiếu Date');
+                        } else {
+                            // Validate date format (optional - có thể thêm regex validation)
+                            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+                            if (!dateRegex.test(values.dateValue)) {
+                                allValid = false;
+                                inputs.date.classList.add('required-field');
+                                inputs.date.classList.remove('valid-field');
+                                rowErrors.push('Date không đúng định dạng (YYYY-MM-DD)');
+                            } else {
+                                inputs.date.classList.add('valid-field');
+                                inputs.date.classList.remove('required-field');
+                            }
+                        }
+                        
+                        // 4. Validate Product Quantity vs Actual Quantity
+                        if (values.productCodes) {
+                            const productCodesList = this.parseProductCodes(values.productCodes);
+                            const actualQuantity = productCodesList.length;
+                            
+                            if (values.expectedQuantity > 0) {
+                                if (values.expectedQuantity !== actualQuantity) {
+                                    allValid = false;
+                                    inputs.quantity.classList.add('required-field');
+                                    inputs.quantity.classList.remove('valid-field');
+                                    rowErrors.push(`số lượng không khớp (dự kiến: ${values.expectedQuantity}, thực tế: ${actualQuantity})`);
+                                } else {
+                                    inputs.quantity.classList.add('valid-field');
+                                    inputs.quantity.classList.remove('required-field');
+                                }
+                            } else {
+                                // Nếu không nhập số lượng dự kiến, cảnh báo
+                                inputs.quantity.classList.add('required-field');
+                                inputs.quantity.classList.remove('valid-field');
+                                rowErrors.push(`chưa nhập số lượng dự kiến (hiện có ${actualQuantity} mã)`);
+                                allValid = false;
+                            }
+                        }
+                        
+                        // ============ VALIDATE BUSINESS RULES ============
+                        
+                        // 5. Validate complete row data
+                        if (values.boxCode && values.productCodes && values.dateValue && values.expectedQuantity > 0) {
+                            const productCodesList = this.parseProductCodes(values.productCodes);
+                            
+                            // Check if box code and product codes are consistent
+                            if (productCodesList.length === 0) {
+                                allValid = false;
+                                rowErrors.push('mã sản phẩm không hợp lệ sau khi parse');
+                            }
+                            
+                            // Additional business rule checks can be added here
+                            // Example: Check if box capacity matches product count
+                            // Example: Check if date is within valid range
+                        }
+                        
+                        // Lưu lỗi của dòng này nếu có
+                        if (rowErrors.length > 0) {
+                            invalidDetails.push({
+                                row: i + 1,
+                                errors: rowErrors,
+                                data: {
+                                    boxCode: values.boxCode || '(trống)',
+                                    productCount: values.productCodes ? this.parseProductCodes(values.productCodes).length : 0,
+                                    expectedQuantity: values.expectedQuantity,
+                                    date: values.dateValue || '(trống)'
+                                }
+                            });
+                        }
+                        
+                    } catch (error) {
+                        console.error(`Database check error at row ${i + 1}:`, error);
+                        allValid = false;
+                        
+                        // Clear all styling on error
+                        this.clearAllFieldStyling(inputs);
+                        
+                        invalidDetails.push({
+                            row: i + 1,
+                            errors: [`lỗi kết nối database: ${error.message || 'Unknown error'}`],
+                            data: { error: true }
+                        });
+                    }
+                    
+                    // Update display for this row
+                    this.updateBoxDisplay(i);
+                }
+                
+                // ============ FINAL VALIDATION ============
+                
+                // Nếu không có dữ liệu nào để check
+                if (!hasAnyDataToCheck) {
+                    allValid = false;
+                    invalidDetails.push({
+                        row: 'Tổng quan',
+                        errors: ['Không có dữ liệu nào để kiểm tra - cần ít nhất 1 thùng hàng'],
+                        data: { global: true }
+                    });
+                }
+                
+                // ============ DISPLAY DETAILED ERRORS ============
+                
+                if (invalidDetails.length > 0) {
+                    let detailMessage = '❌ Chi tiết lỗi kiểm tra cơ sở dữ liệu:<br><br>';
+                    
+                    invalidDetails.forEach(detail => {
+                        if (detail.data.global) {
+                            detailMessage += `<div style="margin-bottom: 10px; padding: 8px; background: #fff3cd; border-left: 3px solid #ffc107; border-radius: 3px;">`;
+                            detailMessage += `<strong>${detail.row}:</strong><br>`;
+                        } else if (detail.data.error) {
+                            detailMessage += `<div style="margin-bottom: 10px; padding: 8px; background: #f8d7da; border-left: 3px solid #dc3545; border-radius: 3px;">`;
+                            detailMessage += `<strong>Dòng ${detail.row}:</strong> Lỗi hệ thống<br>`;
+                        } else {
+                            detailMessage += `<div style="margin-bottom: 10px; padding: 8px; background: #f8d7da; border-left: 3px solid #dc3545; border-radius: 3px;">`;
+                            detailMessage += `<strong>Dòng ${detail.row}:</strong> ${detail.data.boxCode} | ${detail.data.productCount} mã | SL: ${detail.data.expectedQuantity} | ${detail.data.date}<br>`;
+                        }
+                        
+                        detail.errors.forEach(error => {
+                            detailMessage += `<small style="color: #721c24;">• ${error}</small><br>`;
                         });
                         
-                        if (hasSubmitButton) {
-                            setTimeout(() => {
-                                disableAllSubmitButtons();
-                                validateAllRequiredFields();
-                            }, 100);
-                        }
+                        detailMessage += `</div>`;
+                    });
+                    
+                    // Update step với thông tin chi tiết
+                    const progressDiv = document.getElementById('check-progress');
+                    if (progressDiv && progressDiv.lastElementChild) {
+                        progressDiv.lastElementChild.innerHTML = detailMessage;
+                    }
+                }
+                
+                return allValid;
+            },
+
+            clearAllFieldStyling(inputs) {
+                const fields = [inputs.boxCode, inputs.productCodes, inputs.date, inputs.quantity];
+                const classes = ['required-field', 'valid-field', 'invalid-code', 'assigned-to-box'];
+                
+                fields.forEach(field => {
+                    if (field) {
+                        classes.forEach(cls => field.classList.remove(cls));
                     }
                 });
-            });
-            
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        });
+            },
 
-        // If DOM is already ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initializeValidation);
-        } else {
-            initializeValidation();
-        }
+            async checkProductAssignment() {
+                const allProductCodes = this.getAllProductCodes();
+                if (allProductCodes.length === 0) return true;
+                
+                try {
+                    const assignmentStatus = await this.apiCall('check_product_box_assignment', { product_codes: allProductCodes });
+                    let allNotAssigned = true;
+                    let assignedProductsDetails = []; // Thêm array để lưu chi tiết
+                    
+                    document.querySelectorAll('#import_check_boxes_table tbody tr').forEach((row, index) => {
+                        const inputs = this.getRowInputs(row);
+                        if (!inputs.productCodes) return;
+                        
+                        const productCodesList = this.parseProductCodes(inputs.productCodes.value.trim());
+                        let hasAssigned = false;
+                        
+                        for (const code of productCodesList) {
+                            if (assignmentStatus[code] && assignmentStatus[code].assigned) {
+                                hasAssigned = true;
+                                allNotAssigned = false;
+                                this.cache.productAssignments[code] = assignmentStatus[code];
+                                // Lưu chi tiết mã đã bị phân bổ
+                                assignedProductsDetails.push({
+                                    code: code,
+                                    assignedToBox: assignmentStatus[code].box_barcode,
+                                    rowIndex: index + 1
+                                });
+                            }
+                        }
+                        
+                        if (hasAssigned) inputs.productCodes.classList.add('assigned-to-box');
+                        else inputs.productCodes.classList.remove('assigned-to-box');
+                        
+                        this.updateBoxDisplay(index);
+                    });
+                    
+                    // Cập nhật step với thông tin chi tiết
+                    if (assignedProductsDetails.length > 0) {
+                        // Nhóm theo thùng để hiển thị gọn hơn
+                        const groupedByBox = {};
+                        assignedProductsDetails.forEach(item => {
+                            if (!groupedByBox[item.assignedToBox]) {
+                                groupedByBox[item.assignedToBox] = [];
+                            }
+                            groupedByBox[item.assignedToBox].push(`${item.code} (dòng ${item.rowIndex})`);
+                        });
+                        
+                        let detailMessage = '❌ Có mã sản phẩm đã được phân bổ vào thùng khác:<br>';
+                        Object.entries(groupedByBox).forEach(([boxCode, codes]) => {
+                            detailMessage += `<small style="color: #ff6b35;">• Thùng <strong>${boxCode}</strong>: ${codes.join(', ')}</small><br>`;
+                        });
+                        
+                        // Update step với thông tin chi tiết
+                        const progressDiv = document.getElementById('check-progress');
+                        if (progressDiv && progressDiv.lastElementChild) {
+                            progressDiv.lastElementChild.innerHTML = detailMessage;
+                        }
+                    }
+                    
+                    return allNotAssigned;
+                } catch (error) {
+                    console.error('Assignment check error:', error);
+                    return false;
+                }
+            },
 
-        // ============ EXPORT FUNCTIONS ============
-        window.postValidation = {
-            validate: validateAllRequiredFields,
-            getState: () => ({ ...validationState }),
-            isValid: () => Object.values(validationState).every(v => v === true)
+            // ============ HELPER METHODS ============
+            getRowInputs(row) {
+                const boxCode = row.querySelector('input[name*="[box_code]"]');
+                const quantity = row.querySelector('input[name*="[product_quantity]"]');
+                const productCodes = row.querySelector('textarea[name*="[product_codes]"]');
+                const date = row.querySelector('input[name*="[lot_date]"]');
+                return { boxCode, quantity, productCodes, date, all: boxCode && quantity && productCodes && date };
+            },
+
+            getRowValues(inputs) {
+                return {
+                    boxCode: inputs.boxCode ? inputs.boxCode.value.trim() : '',
+                    expectedQuantity: inputs.quantity ? parseInt(inputs.quantity.value) || 0 : 0,
+                    productCodes: inputs.productCodes ? inputs.productCodes.value.trim() : '',
+                    dateValue: inputs.date ? inputs.date.value.trim() : ''
+                };
+            },
+
+            parseProductCodes(productCodes) {
+                return productCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
+            },
+
+            getAllProductCodes() {
+                const allCodes = [];
+                document.querySelectorAll('#import_check_boxes_table tbody tr').forEach(row => {
+                    const input = row.querySelector('textarea[name*="[product_codes]"]');
+                    if (input && input.value.trim()) {
+                        allCodes.push(...this.parseProductCodes(input.value.trim()));
+                    }
+                });
+                return [...new Set(allCodes)];
+            },
+
+            findInternalDuplicates(codes) {
+                const seen = {}, duplicates = [];
+                codes.forEach(code => {
+                    if (seen[code]) { if (!duplicates.includes(code)) duplicates.push(code); }
+                    else seen[code] = true;
+                });
+                return duplicates;
+            },
+
+            findDuplicateBoxCodes(currentIndex, currentCodes) {
+                const duplicates = [];
+                document.querySelectorAll('#import_check_boxes_table tbody tr').forEach((row, index) => {
+                    if (index === currentIndex) return;
+                    const input = row.querySelector('input[name*="[box_code]"]');
+                    if (input) {
+                        const otherCode = input.value.trim();
+                        currentCodes.forEach(code => { if (code && otherCode === code) duplicates.push(code); });
+                    }
+                });
+                return [...new Set(duplicates)];
+            },
+
+            findDuplicateProductCodes(currentIndex, currentCodes) {
+                const duplicates = [];
+                document.querySelectorAll('#import_check_boxes_table tbody tr').forEach((row, index) => {
+                    if (index === currentIndex) return;
+                    const input = row.querySelector('textarea[name*="[product_codes]"]');
+                    if (input && input.value.trim()) {
+                        const otherCodes = this.parseProductCodes(input.value.trim());
+                        currentCodes.forEach(code => { if (otherCodes.includes(code)) duplicates.push(code); });
+                    }
+                });
+                return [...new Set(duplicates)];
+            },
+
+            markFieldError(field, bgColor = '#ffe6e6') {
+                field.style.borderColor = '#e74c3c';
+                field.style.backgroundColor = bgColor;
+            },
+
+            clearFieldError(field) {
+                field.style.borderColor = '';
+                field.style.backgroundColor = '';
+            },
+
+            updateBoxDisplay(index) {
+                const inputs = this.getRowInputs(document.querySelectorAll('#import_check_boxes_table tbody tr')[index]);
+                if (!inputs.all) return;
+
+                const values = this.getRowValues(inputs);
+                const productCodesList = this.parseProductCodes(values.productCodes);
+                const actualQuantity = productCodesList.length;
+                
+                const statusDiv = document.getElementById(`box_status_${index}`);
+                const messageDiv = document.getElementById(`box_message_${index}`);
+                if (!statusDiv || !messageDiv) return;
+
+                let messages = [];
+
+                // Quantity check
+                if (values.expectedQuantity > 0 || actualQuantity > 0) {
+                    if (values.expectedQuantity === actualQuantity && values.expectedQuantity > 0) {
+                        messages.push('<span style="color: green;">✅ Số lượng khớp (' + actualQuantity + ' mã)</span>');
+                    } else {
+                        messages.push('<span style="color: red;">❌ Số lượng không khớp</span><br><small>Dự kiến: ' + values.expectedQuantity + ' | Thực tế: ' + actualQuantity + '</small>');
+                    }
+                }
+
+                // Date check
+                messages.push(values.dateValue ? 
+                    '<span style="color: #28a745;">✅ Date hợp lệ</span>' : 
+                    '<span style="color: #e74c3c;">⚠️ Date là bắt buộc</span>');
+
+                // Database status
+                if (values.boxCode && this.cache.boxes[values.boxCode]) {
+                    const status = this.cache.boxes[values.boxCode];
+                    if (!status.exists) messages.push('<span style="color: #e74c3c;">❌ Mã thùng không tồn tại</span>');
+                    else if (status.status !== 'unused') messages.push('<span style="color: #e74c3c;">❌ Mã thùng đã được sử dụng</span>');
+                    else messages.push('<span style="color: #28a745;">✅ Mã thùng hợp lệ</span>');
+                }
+
+                // Assignment check
+                if (values.productCodes) {
+                    const assignedProducts = productCodesList.filter(code => 
+                        this.cache.productAssignments[code] && this.cache.productAssignments[code].assigned
+                    );
+                    
+                    if (assignedProducts.length > 0) {
+                        messages.push('<span style="color: #ff6b35;">🚫 Có mã đã thuộc thùng khác:</span>');
+                        assignedProducts.forEach(code => {
+                            const info = this.cache.productAssignments[code];
+                            messages.push(`<small style="color: #ff6b35;">• ${code} (thuộc thùng: ${info.box_barcode})</small>`);
+                        });
+                    } else if (productCodesList.length > 0) {
+                        const allChecked = productCodesList.every(code => this.cache.productAssignments.hasOwnProperty(code));
+                        if (allChecked) messages.push('<span style="color: #28a745;">✅ Tất cả mã chưa thuộc thùng nào</span>');
+                    }
+                }
+
+                // Status
+                let status;
+                if (values.boxCode && values.productCodes && values.dateValue) {
+                    status = values.expectedQuantity === actualQuantity ? 
+                        '<span style="color: green;">✅ Hoàn thành</span>' : 
+                        '<span style="color: #e74c3c;">❌ Có lỗi cần sửa</span>';
+                } else {
+                    const missing = [];
+                    if (!values.boxCode) missing.push('mã thùng');
+                    if (!values.productCodes) missing.push('mã sản phẩm');
+                    if (!values.dateValue) missing.push('date');
+                    status = '<span style="color: orange;">⚠️ Chưa nhập: ' + missing.join(', ') + '</span>';
+                }
+
+                statusDiv.innerHTML = status;
+                messageDiv.innerHTML = messages.join('<br>') || '<em style="color: #666;">Nhập thông tin để kiểm tra</em>';
+            },
+
+            updateStats() {
+                const rows = document.querySelectorAll('#import_check_boxes_table tbody tr');
+                let totalBoxes = 0, totalActualCodes = 0, totalExpectedCodes = 0, validBoxes = 0;
+
+                rows.forEach(row => {
+                    const inputs = this.getRowInputs(row);
+                    if (!inputs.all) return;
+
+                    const values = this.getRowValues(inputs);
+                    if (values.boxCode || values.expectedQuantity > 0 || values.productCodes) {
+                        totalBoxes++;
+                        totalExpectedCodes += values.expectedQuantity;
+
+                        if (values.productCodes) {
+                            totalActualCodes += this.parseProductCodes(values.productCodes).length;
+                        }
+
+                        const hasValidInfo = values.boxCode && values.productCodes && values.dateValue && values.expectedQuantity > 0;
+                        const quantityMatch = values.expectedQuantity > 0 && values.productCodes && 
+                                            values.expectedQuantity === this.parseProductCodes(values.productCodes).length;
+                        
+                        if (hasValidInfo && quantityMatch) validBoxes++;
+                    }
+                });
+
+                document.getElementById('total-boxes').textContent = totalBoxes;
+                document.getElementById('total-codes').textContent = totalActualCodes;
+                document.getElementById('expected-codes').textContent = totalExpectedCodes;
+
+                const matchStatusElement = document.getElementById('match-status');
+                if (totalBoxes === 0) {
+                    matchStatusElement.textContent = '-';
+                    matchStatusElement.style.color = '#666';
+                } else if (validBoxes === totalBoxes && totalActualCodes === totalExpectedCodes) {
+                    matchStatusElement.textContent = '100%';
+                    matchStatusElement.style.color = '#28a745';
+                } else {
+                    const percentage = totalBoxes > 0 ? Math.round((validBoxes / totalBoxes) * 100) : 0;
+                    matchStatusElement.textContent = percentage + '%';
+                    matchStatusElement.style.color = percentage < 100 ? '#dc3545' : '#28a745';
+                }
+            },
+
+            updateSummary() {
+                const summaryElement = document.getElementById('validation-summary');
+                const invalidConditions = this.getInvalidConditions();
+                
+                if (invalidConditions.length === 0) {
+                    summaryElement.className = 'validation-summary success';
+                    summaryElement.innerHTML = '<h4>✅ Sẵn sàng cập nhật</h4><p>Tất cả thông tin bắt buộc đã được nhập đầy đủ và hợp lệ.</p>';
+                } else {
+                    summaryElement.className = 'validation-summary error';
+                    summaryElement.innerHTML = `<h4>⚠️ Cần nhập thêm thông tin để có thể cập nhật</h4><ul>${invalidConditions.map(condition => `<li>${condition}</li>`).join('')}</ul>`;
+                }
+            },
+
+            // ============ SUBMIT BUTTON CONTROL ============
+            disableSubmitButtons() {
+                this.toggleSubmitButtons(true);
+            },
+
+            enableSubmitButtons() {
+                this.toggleSubmitButtons(false);
+            },
+
+            toggleSubmitButtons(disable) {
+                const selectors = ['#publish', '#save-post', 'input[name="publish"]', 'input[name="save"]', 
+                                '.editor-post-publish-button', '#publishing-action input[type="submit"]',
+                                '#publishing-action .button-primary', '#submitdiv input[type="submit"]', '.button-primary[type="submit"]'];
+                
+                document.querySelectorAll(selectors.join(',')).forEach(button => {
+                    button.disabled = disable;
+                    button.classList.toggle('submit-button-disabled', disable);
+                    button.title = disable ? 'Vui lòng kiểm tra và sửa lỗi trước khi cập nhật' : 'Có thể cập nhật';
+                });
+            },
+
+            // ============ EVENT LISTENERS ============
+            setupEventListeners() {
+                // Main check button
+                document.getElementById('check_all_validations').addEventListener('click', async (e) => {
+                    await this.checkAll();
+                });
+
+                // Add box row
+                document.getElementById('add_box_row').addEventListener('click', () => {
+                    const tableBody = document.querySelector('#import_check_boxes_table tbody');
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<?php echo str_replace(["\n", "'"], ["", "\\'"], render_import_box_row()); ?>`.replace(/__index__/g, this.boxRowIndex);
+                    tableBody.appendChild(row);
+                    this.initBoxRowEventListeners(this.boxRowIndex);
+                    this.boxRowIndex++;
+                    this.updateStats();
+                });
+
+                // Remove box row
+                document.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('remove-box-row')) {
+                        e.target.closest('tr').remove();
+                        this.updateStats();
+                    }
+                });
+
+                // Form validation
+                ['title', 'import_date'].forEach(fieldId => {
+                    const input = document.getElementById(fieldId);
+                    if (input) {
+                        input.addEventListener(fieldId === 'title' ? 'input' : 'change', () => {
+                            this.validateField(fieldId);
+                            this.updateSummary();
+                        });
+                    }
+                });
+
+                // Form submit prevention
+                this.setupSubmitPrevention();
+
+                // Initialize existing rows
+                document.querySelectorAll('#import_check_boxes_table tbody tr').forEach((row, index) => {
+                    this.initBoxRowEventListeners(index);
+                });
+
+                // Submit button observer
+                this.setupSubmitButtonObserver();
+            },
+
+            initBoxRowEventListeners(index) {
+                const selectors = [
+                    { name: 'product_codes', event: 'input', clearCache: (val, oldVal) => {
+                        // Clear cache cho tất cả codes cũ
+                        if (oldVal) {
+                            const oldCodes = this.parseProductCodes(oldVal);
+                            oldCodes.forEach(code => {
+                                delete this.cache.products[code];
+                                delete this.cache.productAssignments[code];
+                            });
+                        }
+                        // Clear cache cho codes mới nếu có
+                        if (val) {
+                            const newCodes = this.parseProductCodes(val);
+                            newCodes.forEach(code => {
+                                delete this.cache.products[code];
+                                delete this.cache.productAssignments[code];
+                            });
+                        }
+                    }},
+                    { name: 'box_code', event: 'input', clearCache: (val, oldVal) => {
+                        if (oldVal) delete this.cache.boxes[oldVal.trim()];
+                        if (val) delete this.cache.boxes[val.trim()];
+                    }},
+                    { name: 'product_quantity', event: 'input' },
+                    { name: 'lot_date', event: 'change' }
+                ];
+
+                selectors.forEach(selector => {
+                    const input = document.querySelector(`[name="import_check_boxes[${index}][${selector.name}]"]`);
+                    if (input) {
+                        let oldValue = input.value; // Lưu giá trị cũ
+                        
+                        input.addEventListener(selector.event, () => {
+                            if (selector.clearCache) {
+                                selector.clearCache(input.value, oldValue);
+                            }
+                            oldValue = input.value; // Cập nhật giá trị cũ
+                            
+                            this.updateBoxDisplay(index);
+                            this.updateStats();
+                            
+                            // Reset validation state khi có thay đổi
+                            this.resetValidationState();
+                        });
+                    }
+                });
+            },
+
+            resetValidationState() {
+                // Reset validation state về false khi có thay đổi dữ liệu
+                Object.keys(this.conditions).forEach(key => {
+                    this.state[this.conditions[key]] = false;
+                });
+                
+                // Clear duplicate highlighting
+                this.clearAllDuplicateHighlighting();
+                
+                // Disable submit buttons
+                this.disableSubmitButtons();
+                
+                // Update summary để hiển thị cần kiểm tra lại
+                const summaryElement = document.getElementById('validation-summary');
+                summaryElement.className = 'validation-summary error';
+                summaryElement.innerHTML = `
+                    <h4>⚠️ Dữ liệu đã thay đổi - Cần kiểm tra lại</h4>
+                    <ul><li>❌ Vui lòng bấm "Kiểm tra tất cả" để validate dữ liệu mới</li></ul>
+                `;
+            },
+
+            setupSubmitPrevention() {
+                const form = document.getElementById('post');
+                if (form) {
+                    form.addEventListener('submit', (e) => {
+                        const allValid = Object.values(this.state).every(v => v === true);
+                        if (!allValid) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            alert('❌ Vui lòng click "Kiểm tra tất cả" và sửa các lỗi trước khi cập nhật!');
+                            return false;
+                        }
+                    });
+                }
+
+                document.addEventListener('click', (e) => {
+                    const isSubmitButton = e.target.matches(['#publish', '#save-post', 'input[name="publish"]', 
+                        'input[name="save"]', '.editor-post-publish-button', '#publishing-action input[type="submit"]',
+                        '#publishing-action .button-primary', '#submitdiv input[type="submit"]', '.button-primary[type="submit"]'].join(','));
+
+                    if (isSubmitButton && e.target.disabled) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        alert('❌ Vui lòng click "Kiểm tra tất cả" và sửa các lỗi trước khi cập nhật!');
+                        return false;
+                    }
+                }, true);
+            },
+
+            setupSubmitButtonObserver() {
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach(mutation => {
+                        if (mutation.addedNodes.length > 0) {
+                            const hasSubmitButton = Array.from(mutation.addedNodes).some(node => {
+                                return node.nodeType === 1 && node.matches && (
+                                    node.matches('#publish') || node.matches('#save-post') ||
+                                    node.matches('input[name="publish"]') || node.matches('input[name="save"]') ||
+                                    node.matches('.button-primary[type="submit"]')
+                                );
+                            });
+                            if (hasSubmitButton) setTimeout(() => this.disableSubmitButtons(), 100);
+                        }
+                    });
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            },
+
+            // ============ API HELPER ============
+            async apiCall(action, data) {
+                return new Promise((resolve, reject) => {
+                    jQuery.ajax({
+                        url: ajax_url,
+                        type: 'POST',
+                        data: { action, ...data, nonce: check_barcode_nonce },
+                        success: (response) => response.success ? resolve(response.data) : reject('API call failed'),
+                        error: () => reject('Network error')
+                    });
+                });
+            }
         };
-        
+
+        // ============ INITIALIZATION ============
+        document.addEventListener('DOMContentLoaded', () => ValidationManager.init());
+        if (document.readyState !== 'loading') ValidationManager.init();
     </script>
     <?php
 }
-
 function render_import_box_row($box_code = '', $product_quantity = '', $product_codes = '', $lot_date = '', $index = '__index__') {
     ob_start();
     ?>
@@ -1516,7 +1962,8 @@ function render_import_box_row($box_code = '', $product_quantity = '', $product_
                 value="<?php echo esc_attr($box_code); ?>"
                 placeholder="Nhập mã thùng"
                 style="width: 150px;"
-                title="Mã định danh thùng (phải là duy nhất)" />
+                title="Mã định danh thùng (phải tồn tại trong DB với status=unused)" />
+            <span class="db-status-indicator" id="box_db_status_<?php echo $index; ?>"></span>
         </td>
 
         <td>
@@ -1536,19 +1983,21 @@ function render_import_box_row($box_code = '', $product_quantity = '', $product_
                 data-index="<?php echo esc_attr($index); ?>"
                 rows="4"
                 style="width: 350px;"
-                placeholder="Nhập mã sản phẩm, mỗi dòng 1 mã"
+                placeholder="Nhập mã sản phẩm (phải tồn tại trong DB với status=unused)"
                 title="Danh sách mã sản phẩm trong thùng này"
             ><?php echo esc_textarea($product_codes); ?></textarea>
+            <span class="db-status-indicator" id="products_db_status_<?php echo $index; ?>"></span>
         </td>
+        
         <td>
             <input type="date"
                 name="import_check_boxes[<?php echo $index; ?>][lot_date]"
                 value="<?php echo esc_attr($lot_date); ?>"
                 placeholder="Nhập lô date"
-                style="<?php echo empty($lot_date) ? 'border: 2px solid #dc3545; background-color: #fff5f5;' : 'border: 2px solid #28a745; background-color: #f8fff8;'; ?>"
                 title="Lô date cho thùng này (bắt buộc)"
                 required />
         </td>
+        
         <td>
             <div id="box_status_<?php echo esc_attr($index); ?>" style="font-size: 12px; max-width: 150px;">
                 <em style="color: #666;">Nhập thông tin thùng hàng</em>
@@ -1557,12 +2006,12 @@ function render_import_box_row($box_code = '', $product_quantity = '', $product_
                 <em style="color: #666;">Nhập thông tin để kiểm tra</em>
             </div>
         </td>
+        
         <td><button type="button" class="button remove-box-row" title="Xóa thùng này">✕</button></td>
     </tr>
     <?php
     return ob_get_clean();
 }
-
 
 // Product
 add_action('save_post_product', function($post_id) {
@@ -1602,6 +2051,173 @@ add_action('manage_product_posts_custom_column', function($column, $post_id) {
         echo esc_html(get_post_meta($post_id, 'custom_prod_id', true));
     }
 }, 10, 2);
+
+add_action('wp_ajax_check_barcode_status', 'ajax_check_barcode_status');
+add_action('wp_ajax_nopriv_check_barcode_status', 'ajax_check_barcode_status');
+
+function ajax_check_barcode_status() {
+    global $wpdb;
+    
+    // Verify nonce for security
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'check_barcode_nonce')) {
+        wp_die('Security check failed');
+    }
+    
+    $type = sanitize_text_field($_POST['type']);
+    $codes = $_POST['codes'];
+    $response = [];
+    
+    if ($type === 'box') {
+        $box_table = BIZGPT_PLUGIN_WP_BOX_MANAGER;
+        
+        foreach ($codes as $code) {
+            $code = sanitize_text_field($code);
+            if (empty($code)) continue;
+            
+            $box = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $box_table WHERE barcode = %s",
+                $code
+            ));
+            
+            if (!$box) {
+                $response[$code] = [
+                    'exists' => false,
+                    'status' => null,
+                    'message' => 'Mã thùng không tồn tại trong hệ thống'
+                ];
+            } else {
+                $response[$code] = [
+                    'exists' => true,
+                    'status' => $box->status,
+                    'message' => $box->status === 'unused' ? 'OK' : 'Mã thùng đã được sử dụng'
+                ];
+            }
+        }
+    } else if ($type === 'product') {
+        $barcode_table = BIZGPT_PLUGIN_WP_BARCODE;
+        
+        foreach ($codes as $code) {
+            $code = sanitize_text_field($code);
+            if (empty($code)) continue;
+            
+            $barcode = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $barcode_table WHERE barcode = %s",
+                $code
+            ));
+            
+            if (!$barcode) {
+                $response[$code] = [
+                    'exists' => false,
+                    'status' => null,
+                    'message' => 'Mã sản phẩm không tồn tại trong hệ thống'
+                ];
+            } else {
+                $response[$code] = [
+                    'exists' => true,
+                    'status' => $barcode->status,
+                    'message' => $barcode->status === 'unused' ? 'OK' : 'Mã sản phẩm đã được sử dụng'
+                ];
+            }
+        }
+    }
+    
+    wp_send_json_success($response);
+}
+
+add_action('admin_footer', function() {
+    $screen = get_current_screen();
+    if ($screen && $screen->post_type === 'import_check') {
+        ?>
+        <script>
+            var check_barcode_nonce = '<?php echo wp_create_nonce('check_barcode_nonce'); ?>';
+            var ajax_url = '<?php echo admin_url('admin-ajax.php'); ?>';
+        </script>
+        <?php
+    }
+});
+
+add_action('wp_ajax_check_product_box_assignment', 'check_product_box_assignment_callback');
+add_action('wp_ajax_nopriv_check_product_box_assignment', 'check_product_box_assignment_callback');
+
+function check_product_box_assignment_callback() {
+    // Verify nonce
+    if (!wp_verify_nonce($_POST['nonce'], 'check_barcode_nonce')) {
+        wp_send_json_error('Invalid nonce');
+        return;
+    }
+    
+    $product_codes = isset($_POST['product_codes']) ? $_POST['product_codes'] : array();
+    
+    if (empty($product_codes) || !is_array($product_codes)) {
+        wp_send_json_error('No product codes provided');
+        return;
+    }
+    
+    global $wpdb;
+    $table_name = BIZGPT_PLUGIN_WP_BARCODE;
+    
+    $results = array();
+    
+    try {
+        $sanitized_codes = array();
+        foreach ($product_codes as $code) {
+            $sanitized_code = sanitize_text_field(trim($code));
+            if (!empty($sanitized_code)) {
+                $sanitized_codes[] = $sanitized_code;
+            }
+        }
+        
+        if (empty($sanitized_codes)) {
+            wp_send_json_error('No valid product codes provided');
+            return;
+        }
+        
+        // Create placeholders for prepared statement
+        $placeholders = implode(',', array_fill(0, count($sanitized_codes), '%s'));
+        
+        // Query để kiểm tra các mã sản phẩm và box_barcode của chúng
+        $query = $wpdb->prepare(
+            "SELECT barcode, box_barcode, status 
+             FROM {$table_name} 
+             WHERE barcode IN ($placeholders)",
+            $sanitized_codes
+        );
+        
+        $db_results = $wpdb->get_results($query, ARRAY_A);
+        
+        // Initialize results for all requested codes
+        foreach ($sanitized_codes as $code) {
+            $results[$code] = array(
+                'exists' => false,
+                'assigned' => false,
+                'box_barcode' => null,
+                'status' => null
+            );
+        }
+        
+        // Process database results
+        if ($db_results) {
+            foreach ($db_results as $row) {
+                $barcode = $row['barcode'];
+                $box_barcode = $row['box_barcode'];
+                $status = $row['status'];
+                
+                $results[$barcode] = array(
+                    'exists' => true,
+                    'assigned' => !empty($box_barcode),
+                    'box_barcode' => $box_barcode,
+                    'status' => $status
+                );
+            }
+        }
+        
+        wp_send_json_success($results);
+        
+    } catch (Exception $e) {
+        error_log('Error in check_product_box_assignment_callback: ' . $e->getMessage());
+        wp_send_json_error('Database error occurred');
+    }
+}
 
 
 

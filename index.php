@@ -12,7 +12,7 @@ global $wpdb;
 define('BIZGPT_PLUGIN_DB_VERSION', '1.15');
 define ('BIZGPT_PLUGIN_WP_BARCODE', $wpdb->prefix . 'gpt_barcode');
 define ('BIZGPT_PLUGIN_WP_LOGS', $wpdb->prefix . 'gpt_logs');
-// define ('BIZGPT_PLUGIN_WP_CUSTOMERS', $wpdb->prefix . 'gpt_customers');
+define ('BIZGPT_PLUGIN_WP_CUSTOMERS', $wpdb->prefix . 'gpt_customers');
 define ('BIZGPT_PLUGIN_WP_LOCATION_WARNINGS', $wpdb->prefix . 'gpt_location_warnings');
 define ('BIZGPT_PLUGIN_WP_AFFILIATE_STATS', $wpdb->prefix . 'gpt_affiliate_stats');
 define ('BIZGPT_PLUGIN_WP_AFFILIATE_LOGS', $wpdb->prefix . 'gpt_affiliate_logs');

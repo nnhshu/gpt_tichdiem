@@ -1,6 +1,7 @@
 <?php
 
 add_action('wp_ajax_gpt_delete_barcode', 'gpt_delete_barcode');
+add_action('wp_ajax_gpt_delete_all_barcode', 'gpt_delete_all_barcode');
 add_action('admin_post_gpt_export_barcode_excel', 'gpt_export_barcode_with_image');
 add_action('admin_post_nopriv_gpt_export_barcode_excel', 'gpt_export_barcode_with_image');
 
@@ -9,60 +10,228 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 
-function gpt_delete_barcode() {
+function gpt_delete_all_barcode() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BARCODE;
 
-    if (empty($_POST['ids']) || !is_array($_POST['ids'])) {
-        wp_send_json(['status' => 'error', 'message' => 'Dữ liệu không hợp lệ.']);
-    }
-
-    $ids = array_map('intval', $_POST['ids']);
-    $id_placeholders = implode(',', array_fill(0, count($ids), '%d'));
-    $sql = "DELETE FROM $table WHERE id IN ($id_placeholders)";
-    $query = $wpdb->prepare($sql, ...$ids);
-    $deleted = $wpdb->query($query);
+    // Xoá toàn bộ dữ liệu
+    $deleted = $wpdb->query("DELETE FROM $table");
 
     if ($deleted !== false) {
-        wp_send_json(['status' => 'success']);
+        wp_send_json(['status' => 'success', 'message' => 'Đã xoá toàn bộ dữ liệu.']);
     } else {
         wp_send_json(['status' => 'error', 'message' => 'Không thể xóa dữ liệu.']);
     }
 }
 
+
 function gpt_export_barcode_with_image() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BARCODE;
 
-    $rows = $wpdb->get_results("SELECT * FROM $table WHERE status = 'unused' ORDER BY id DESC");
+    // Xây dựng điều kiện WHERE dựa trên các tham số
+    $where_conditions = ["status = 'unused'"]; // Mặc định chỉ xuất unused
+    $where_params = [];
+    
+    // Lọc theo sản phẩm
+    if (!empty($_POST['export_product_id'])) {
+        $where_conditions[] = "product_id = %s";
+        $where_params[] = sanitize_text_field($_POST['export_product_id']);
+    }
+    
+    // Lọc theo phiên
+    if (!empty($_POST['export_session'])) {
+        $where_conditions[] = "session = %s";
+        $where_params[] = sanitize_text_field($_POST['export_session']);
+    }
+    
+    // Tạo câu query
+    $where_clause = implode(' AND ', $where_conditions);
+    $sql = "SELECT * FROM $table WHERE $where_clause ORDER BY id DESC";
+    
+    if (!empty($where_params)) {
+        $rows = $wpdb->get_results($wpdb->prepare($sql, ...$where_params));
+    } else {
+        $rows = $wpdb->get_results($sql);
+    }
 
     if (empty($rows)) {
-        wp_die('Không có dữ liệu để xuất.');
+        wp_die('Không có dữ liệu để xuất với các bộ lọc đã chọn.');
     }
 
     $spreadsheet = new Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
-
-    // Header
-    $headers = ['Mã định danh', "Token - Tráng bạc", 'Điểm', 'Trạng thái', 'Ngày tạo', 'Link QR', 'Link Barcode'];
-    $sheet->fromArray($headers, NULL, 'A1');
-
-    $rowIndex = 2;
-    foreach ($rows as $row) {
-        $sheet->setCellValue("A$rowIndex", $row->barcode);
-        $sheet->setCellValue("B$rowIndex", $row->token);
-        $sheet->setCellValue("C$rowIndex", $row->point);
-        $sheet->setCellValue("D$rowIndex", $row->status);
-        $sheet->setCellValue("E$rowIndex", $row->created_at);
-        $sheet->setCellValue("F$rowIndex", $row->qr_code_url);
-        $sheet->setCellValue("G$rowIndex", $row->barcode_url);
-        $rowIndex++;
+    
+    // Thiết lập tên sheet
+    $sheet_name = 'Ma_Cao_Export';
+    if (!empty($_POST['export_product_id'])) {
+        $product_name = '';
+        $products = wc_get_products(['limit' => -1]);
+        foreach ($products as $product) {
+            $custom_product_id = get_post_meta($product->get_id(), 'custom_prod_id', true);
+            if ($custom_product_id == $_POST['export_product_id']) {
+                $product_name = sanitize_title($product->get_name());
+                break;
+            }
+        }
+        if ($product_name) {
+            $sheet_name = substr($product_name, 0, 20);
+        }
     }
+    $sheet->setTitle($sheet_name);
+
+    // Header với style
+    $headers = [
+        'STT',
+        'Mã định danh', 
+        'Token - Trắng bạc', 
+        'Điểm', 
+        'Trạng thái', 
+        'Sản phẩm',
+        'Phiên',
+        'Ngày tạo', 
+        'Link QR', 
+        'Link Barcode'
+    ];
+    
+    $sheet->fromArray($headers, NULL, 'A1');
+    
+    // Style cho header
+    $headerStyle = [
+        'font' => [
+            'bold' => true,
+            'color' => ['rgb' => 'FFFFFF'],
+            'size' => 12
+        ],
+        'fill' => [
+            'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+            'startColor' => ['rgb' => '4472C4']
+        ],
+        'alignment' => [
+            'horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER,
+            'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER
+        ],
+        'borders' => [
+            'allBorders' => [
+                'borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                'color' => ['rgb' => '000000']
+            ]
+        ]
+    ];
+    
+    $sheet->getStyle('A1:J1')->applyFromArray($headerStyle);
+
+    // Thiết lập độ rộng cột
+    $sheet->getColumnDimension('A')->setWidth(5);   // STT
+    $sheet->getColumnDimension('B')->setWidth(20);  // Mã định danh
+    $sheet->getColumnDimension('C')->setWidth(25);  // Token
+    $sheet->getColumnDimension('D')->setWidth(8);   // Điểm
+    $sheet->getColumnDimension('E')->setWidth(15);  // Trạng thái
+    $sheet->getColumnDimension('F')->setWidth(25);  // Sản phẩm
+    $sheet->getColumnDimension('G')->setWidth(10);  // Phiên
+    $sheet->getColumnDimension('H')->setWidth(18);  // Ngày tạo
+    $sheet->getColumnDimension('I')->setWidth(40);  // Link QR
+    $sheet->getColumnDimension('J')->setWidth(40);  // Link Barcode
+
+    // Thêm dữ liệu
+    $rowIndex = 2;
+    $stt = 1;
+    
+    foreach ($rows as $row) {
+        // Tìm tên sản phẩm
+        $product_name = '';
+        $custom_prod_id = $row->product_id;
+        $args = [
+            'post_type' => 'product',
+            'meta_query' => [
+                [
+                    'key' => 'custom_prod_id',
+                    'value' => $custom_prod_id,
+                    'compare' => '='
+                ]
+            ],
+            'posts_per_page' => 1
+        ];
+        $products = get_posts($args);
+        if (!empty($products)) {
+            $product_name = $products[0]->post_title;
+        } else {
+            $product_name = $custom_prod_id;
+        }
+        
+        // Chuyển đổi trạng thái
+        $status_text = '';
+        switch($row->status) {
+            case 'unused': $status_text = 'Chưa sử dụng'; break;
+            case 'used': $status_text = 'Đã sử dụng'; break;
+            case 'pending': $status_text = 'Chờ duyệt'; break;
+            default: $status_text = $row->status;
+        }
+        
+        $sheet->setCellValue("A$rowIndex", $stt);
+        $sheet->setCellValue("B$rowIndex", $row->barcode);
+        $sheet->setCellValue("C$rowIndex", $row->token);
+        $sheet->setCellValue("D$rowIndex", $row->point);
+        $sheet->setCellValue("E$rowIndex", $status_text);
+        $sheet->setCellValue("F$rowIndex", $product_name);
+        $sheet->setCellValue("G$rowIndex", $row->session);
+        $sheet->setCellValue("H$rowIndex", $row->created_at);
+        $sheet->setCellValue("I$rowIndex", $row->qr_code_url);
+        $sheet->setCellValue("J$rowIndex", $row->barcode_url);
+        
+        // Style cho dòng dữ liệu
+        $dataStyle = [
+            'alignment' => [
+                'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                    'color' => ['rgb' => 'CCCCCC']
+                ]
+            ]
+        ];
+        
+        // Màu nền xen kẽ
+        if ($rowIndex % 2 == 0) {
+            $dataStyle['fill'] = [
+                'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'F8F9FA']
+            ];
+        }
+        
+        $sheet->getStyle("A$rowIndex:J$rowIndex")->applyFromArray($dataStyle);
+        
+        $rowIndex++;
+        $stt++;
+    }
+
+    // Tạo tên file
+    $filename = 'ma_cao_export_' . date('Y-m-d_H-i-s');
+    
+    // Thêm thông tin bộ lọc vào tên file
+    $filter_parts = [];
+    if (!empty($_POST['export_product_id'])) {
+        $filter_parts[] = 'product_' . $_POST['export_product_id'];
+    }
+    if (!empty($_POST['export_session'])) {
+        $filter_parts[] = 'session_' . $_POST['export_session'];
+    }
+    
+    if (!empty($filter_parts)) {
+        $filename .= '_' . implode('_', $filter_parts);
+    }
+    
+    $filename .= '.xlsx';
 
     // Header Excel để xuất file
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="ma_cao_export_links.xlsx"');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Cache-Control: max-age=0');
+    header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+    header('Last-Modified: ' . gmdate('D, d M Y H:i:s') . ' GMT');
+    header('Cache-Control: cache, must-revalidate');
+    header('Pragma: public');
 
     $writer = new Xlsx($spreadsheet);
     $writer->save('php://output');
@@ -134,7 +303,70 @@ function gpt_barcode_list_page() {
     $total_pages = ceil($total / $per_page);
 
     ?>
+    <style>
+        .ux-row{
+            align-items: flex-end;
+        }
+    </style>
     <h1>Danh sách mã định danh</h1>
+    <div class="excel-export-section" style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #495057; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
+            📥 Xuất File Excel
+        </h3>
+        
+        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" id="gpt-excel-export-form">
+            <input type="hidden" name="action" value="gpt_export_barcode_excel">
+            
+            <div class="export-filters row form-row ux-row">
+                <div class="col large-2">
+                    <label for="export_product_id">
+                        Chọn sản phẩm:
+                    </label>
+                    <select name="export_product_id" id="export_product_id" class="regular-text" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ced4da;">
+                        <option value="">🔄 Tất cả sản phẩm</option>
+                        <?php
+                        $products = wc_get_products(['limit' => -1]);
+                        foreach ($products as $product) {
+                            $custom_product_id = get_post_meta($product->get_id(), 'custom_prod_id', true);
+                            if ($custom_product_id) {
+                                echo "<option value='{$custom_product_id}' data-product-name='{$product->get_name()}'>{$product->get_name()}</option>";
+                            }
+                        }
+                        ?>
+                    </select>
+                </div>
+                <div class="col large-2">
+                    <label for="export_session">
+                        Chọn phiên:
+                        <span id="session-loading" style="display: none; font-size: 12px; color: #007cba;">(Đang tải...)</span>
+                    </label>
+                    <select name="export_session" id="export_session" class="regular-text" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ced4da;">
+                        <option value="">🔄 Tất cả phiên</option>
+                        <?php
+                        $all_sessions = $wpdb->get_col("SELECT DISTINCT session FROM $table ORDER BY session DESC");
+                        foreach ($all_sessions as $session) {
+                            echo "<option value='{$session}'>Phiên {$session}</option>";
+                        }
+                        ?>
+                    </select>
+                </div>
+                <div class="col large-2">
+                    <button type="submit" class="button button-primary" style="background: #28a745; border-color: #28a745; height: 40px; padding: 0 20px; font-weight: 600; box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);">
+                        📥 Xuất Excel
+                    </button>
+                </div>
+            </div>
+        </form>
+        
+        <!-- Loading indicator -->
+        <div id="gpt-export-loading" style="display: none; margin-top: 15px; text-align: center; padding: 20px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px;">
+            <div class="spinner is-active" style="margin-bottom: 10px; float: none;"></div>
+            <div style="color: #856404;">
+                <strong>🔄 Đang xử lý và tạo file Excel...</strong><br>
+                <small>Vui lòng chờ trong giây lát, không đóng trang web.</small>
+            </div>
+        </div>
+    </div>
     
     <!-- Search Box nổi bật -->
     <div class="search-box" style="background: #f0f8ff; padding: 15px; margin-bottom: 20px; border-left: 4px solid #0073aa;">
@@ -259,10 +491,6 @@ function gpt_barcode_list_page() {
     
     <!-- Action Buttons -->
     <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" style="margin: 0;">
-            <input type="hidden" name="action" value="gpt_export_barcode_excel">
-            <button type="submit" class="button button-primary">📥 Xuất File Excel</button>
-        </form>
         
         <button type="button" id="gpt_delete_selected" class="button button-danger alert">
             🗑️ Xóa các mã đã chọn
@@ -272,11 +500,10 @@ function gpt_barcode_list_page() {
         <div style="margin-left: auto; color: #000; font-size: 14px;">
             <strong>Tổng: <?php echo number_format($total); ?> mã</strong>
         </div>
-    </div>
-    
-    <div id="gpt-export-loading" style="display:none; margin-top:10px;">
-        <div class="spinner is-active" style="margin-bottom: 10px;"></div>
-        <strong>Đang xử lý và tạo file Excel, vui lòng chờ...</strong>
+        <button type="button" id="gpt_delete_all" class="button button-danger alert">
+            🗑️ Xoá toàn bộ mã
+            <span id="gpt_delete_loading" style="display:none;">Đang xóa...</span>
+        </button>
     </div>
     
     <div class="table-wrapper">
@@ -461,6 +688,33 @@ function gpt_barcode_list_page() {
                     alert('Lỗi kết nối server.');
                 });
             });
+
+            $('#gpt_delete_all').on('click', function() {
+                if (!confirm('Bạn có chắc chắn muốn xóa toàn bộ mã?')) {
+                    return;
+                }
+
+                $('#gpt_delete_loading').show();
+                $('#gpt_delete_all').prop('disabled', true);
+
+                $.post(ajaxurl, {
+                    action: 'gpt_delete_all_barcode'
+                }, function(response) {
+                    $('#gpt_delete_loading').hide();
+                    $('#gpt_delete_all').prop('disabled', false);
+
+                    if (response.status === 'success') {
+                        alert('Đã xóa thành công toàn bộ mã!');
+                        location.reload();
+                    } else {
+                        alert('Lỗi: ' + response.message);
+                    }
+                }).fail(function() {
+                    $('#gpt_delete_loading').hide();
+                    $('#gpt_delete_all').prop('disabled', false);
+                    alert('Lỗi kết nối server.');
+                });
+            });
             
             // Enter key for search
             $('#search_barcode').on('keypress', function(e) {
@@ -470,5 +724,164 @@ function gpt_barcode_list_page() {
             });
         });
     </script>
+    <script>
+        jQuery(document).ready(function($) {
+            // Cập nhật thông tin tóm tắt khi thay đổi bộ lọc
+            function updateExportInfo() {
+                let productText = $('#export_product_id option:selected').text();
+                let sessionText = $('#export_session option:selected').text();
+                
+                let info = '📋 <strong>Sẽ xuất:</strong> ';
+                let filters = [];
+                
+                if ($('#export_product_id').val()) {
+                    filters.push('Sản phẩm: ' + productText);
+                }
+                if ($('#export_session').val()) {
+                    filters.push('Phiên: ' + sessionText);
+                }
+                
+                if (filters.length > 0) {
+                    info += filters.join(' | ');
+                } else {
+                    info = '💡 <strong>Chọn bộ lọc phía trên để xuất dữ liệu theo yêu cầu</strong>';
+                }
+                
+                $('#export-info').html(info);
+            }
+            
+            // Hàm load phiên theo sản phẩm
+            function loadSessionsByProduct(productId) {
+                if (!productId) {
+                    // Reset về tất cả phiên
+                    $('#export_session').html('<option value="">🔄 Tất cả phiên</option><?php foreach ($all_sessions as $session) { echo "<option value=\"{$session}\">Phiên {$session}</option>"; } ?>');
+                    updateExportInfo();
+                    return;
+                }
+                
+                $('#session-loading').show();
+                $('#export_session').prop('disabled', true);
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'gpt_get_sessions_by_product',
+                        product_id: productId,
+                        security: '<?php echo wp_create_nonce("gpt_get_sessions_nonce"); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            let options = '<option value="">🔄 Tất cả phiên (của sản phẩm này)</option>';
+                            
+                            if (response.data.sessions && response.data.sessions.length > 0) {
+                                response.data.sessions.forEach(function(session) {
+                                    options += '<option value="' + session + '">Phiên ' + session + ' (' + response.data.counts[session] + ' mã)</option>';
+                                });
+                            } else {
+                                options += '<option value="" disabled>Không có phiên nào cho sản phẩm này</option>';
+                            }
+                            
+                            $('#export_session').html(options);
+                        } else {
+                            alert('Lỗi khi tải phiên: ' + (response.data || 'Unknown error'));
+                        }
+                    },
+                    error: function() {
+                        alert('Lỗi kết nối server khi tải phiên');
+                    },
+                    complete: function() {
+                        $('#session-loading').hide();
+                        $('#export_session').prop('disabled', false);
+                        updateExportInfo();
+                    }
+                });
+            }
+            
+            // Lắng nghe thay đổi sản phẩm
+            $('#export_product_id').on('change', function() {
+                let productId = $(this).val();
+                loadSessionsByProduct(productId);
+            });
+            
+            // Lắng nghe thay đổi phiên
+            $('#export_session').on('change', updateExportInfo);
+            
+            // Xử lý submit form xuất Excel
+            $('#gpt-excel-export-form').on('submit', function(e) {
+                // Hiển thị loading
+                $('#gpt-export-loading').show();
+                
+                // Disable submit button
+                $(this).find('button[type="submit"]').prop('disabled', true).html('⏳ Đang xuất...');
+                setTimeout(function() {
+                    $('#gpt-export-loading').hide();
+                    $('#gpt-excel-export-form button[type="submit"]').prop('disabled', false).html('📥 Xuất Excel');
+                }, 5000);
+                
+            });
+            
+            // Hide loading khi trang load lại (trường hợp lỗi)
+            setTimeout(function() {
+                $('#gpt-export-loading').hide();
+                $('#gpt-excel-export-form button[type="submit"]').prop('disabled', false).html('📥 Xuất Excel');
+            }, 1000);
+        });
+        </script>
 <?php
+}
+
+
+add_action('wp_ajax_gpt_get_sessions_by_product', 'gpt_get_sessions_by_product');
+
+function gpt_get_sessions_by_product() {
+    // Kiểm tra nonce bảo mật
+    if (!wp_verify_nonce($_POST['security'], 'gpt_get_sessions_nonce')) {
+        wp_send_json_error('Nonce verification failed');
+        return;
+    }
+    
+    if (empty($_POST['product_id'])) {
+        wp_send_json_error('Product ID is required');
+        return;
+    }
+    
+    global $wpdb;
+    $table = BIZGPT_PLUGIN_WP_BARCODE;
+    $product_id = sanitize_text_field($_POST['product_id']);
+    
+    try {
+        // Lấy tất cả phiên và số lượng mã của sản phẩm được chọn
+        $results = $wpdb->get_results($wpdb->prepare(
+            "SELECT session, COUNT(*) as count 
+             FROM $table 
+             WHERE product_id = %s 
+             GROUP BY session 
+             ORDER BY session DESC",
+            $product_id
+        ));
+        
+        if ($wpdb->last_error) {
+            wp_send_json_error('Database error: ' . $wpdb->last_error);
+            return;
+        }
+        
+        $sessions = [];
+        $counts = [];
+        
+        foreach ($results as $result) {
+            $sessions[] = $result->session;
+            $counts[$result->session] = $result->count;
+        }
+        
+        wp_send_json_success([
+            'sessions' => $sessions,
+            'counts' => $counts,
+            'total_sessions' => count($sessions),
+            'product_id' => $product_id
+        ]);
+        
+    } catch (Exception $e) {
+        wp_send_json_error('Exception: ' . $e->getMessage());
+    }
 }

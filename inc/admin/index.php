@@ -28,6 +28,7 @@ include plugin_dir_path(__FILE__) . './manage_employee_store/sale_channels.php';
 include plugin_dir_path(__FILE__) . './settings/setting_affiliate.php';
 include plugin_dir_path(__FILE__) . './settings/setting_identifier.php';
 include plugin_dir_path(__FILE__) . './settings/setting_lot.php';
+include plugin_dir_path(__FILE__) . './settings/cron.php';
 
 add_action('admin_menu', function () {
    
@@ -67,11 +68,21 @@ add_action('admin_menu', function () {
         );
         add_submenu_page(
             'gpt-macao',
+            'Cấu hình Lô của sản phẩm',
+            'Cấu hình Lô của sản phẩm',
+            'manage_options',
+            'gpt-lot-manager',
+            'gpt_render_lot_page',
+            3
+        );
+        add_submenu_page(
+            'gpt-macao',
             'Truy xuất mã',
             'Truy xuất mã', 
             'manage_options',
             'gpt-barcode-tracking',
-            'gpt_barcode_tracking_page'
+            'gpt_barcode_tracking_page',
+            4
         );
         add_submenu_page(
             'gpt-macao',
@@ -79,7 +90,8 @@ add_action('admin_menu', function () {
             'Cấu hình kênh bán',
             'manage_options',
             'gpt-store-employee',
-            'gpt_render_store_employee_page'
+            'gpt_render_store_employee_page',
+            5
         );
          add_submenu_page(
             'gpt-macao',
@@ -87,54 +99,9 @@ add_action('admin_menu', function () {
             'Hướng dẫn chung',
             'manage_options',
             'gpt-instructions',
-            'gpt_render_instructions_page'
+            'gpt_render_instructions_page',
+            6
         );
-
-        add_submenu_page(
-            'gpt-manager-tem',
-            'Cấu hình Lô của sản phẩm',
-            'Cấu hình Lô của sản phẩm',
-            'manage_options',
-            'gpt-lot-manager',
-            'gpt_render_lot_page',
-            0
-        );
-        /*add_submenu_page(
-            'gpt-macao',
-            'DS tích & đổi điểm',
-            'DS tích & đổi điểm',
-            'manage_options',
-            'gpt-list-points-report',
-            'gpt_render_config_list_points_page'
-        );
-        add_submenu_page(
-            'gpt-macao',
-            'Quản lí Affiliate',
-            'Quản lí Affiliate',
-            'manage_options',
-            'gpt-affiliate-report',
-            'gpt_render_config_affiliate_page'
-        );*/
-
-        
-
-        // add_submenu_page('gpt-macao', 'Cấu hình chung', 'Cấu hình chung', 'manage_options', 'gpt-macao', 'gpt_config_page');
-        // add_submenu_page('gpt-macao', 'Cấu hình thông báo', 'Cấu hình thông báo', 'manage_options', 'gpt-cau-hinh-thong-bao', 'gpt_notice_config_page');
-        // add_submenu_page('gpt-macao', 'Cấu hình kênh BH', 'Cấu hình kênh BH', 'manage_options', 'gpt-sales-channels', 'gpt_render_sales_channels_page');
-        // add_submenu_page(
-        //     'gpt-macao',
-        //     'Duyệt mã cào',
-        //     'Duyệt mã cào',
-        //     'manage_options',
-        //     'gpt-browse-barcodes',
-        //     'gpt_render_duyet_barcode_page'
-        // );
-        // add_submenu_page('gpt-macao', 'DS mã cào', 'DS mã cào', 'manage_options', 'gpt-danh-sach-ma-cao', 'gpt_macao_list_page');
-        // add_submenu_page('gpt-macao', 'DSKH tích điểm', 'DSKH tích điểm', 'manage_options', 'gpt-khach-hang', 'gpt_customer_list_page');
-        // add_submenu_page('gpt-macao', 'DSKH đổi điểm', 'DSKH đổi điểm', 'manage_options', 'gpt-doi-diem-list', 'gpt_render_exchange_list_page');
-        // add_submenu_page('gpt-macao', 'DS cảnh báo', 'DS cảnh báo', 'manage_options', 'gpt-canh-bao-vi-tri', 'gpt_location_warnings_page');
-        // add_submenu_page('gpt-macao', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-nguoi-duoc-gioi-thieu', 'gpt_referral_list_page');
-        // add_submenu_page('gpt-macao', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-nguoi-gioi-thieu-thanh-cong', 'gpt_successful_referrer_page');
     }
 
     if ( in_array( 'quan_ly_kho', $user_roles ) ) {
@@ -148,6 +115,14 @@ add_action('admin_menu', function () {
             'quan_ly_kho',
             'gpt-store-employee',
             'gpt_render_store_employee_page'
+        );
+        add_submenu_page(
+            'gpt-macao',
+            'Cấu hình Lô của sản phẩm',
+            'Cấu hình Lô của sản phẩm',
+            'quan_ly_kho',
+            'gpt-lot-manager',
+            'gpt_render_lot_page'
         );
         add_submenu_page(
             'gpt-analytics-reports',
@@ -216,24 +191,6 @@ add_action('admin_menu', function () {
         add_submenu_page('gpt-analytics-reports', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-referred-person', 'gpt_referral_list_page');
         add_submenu_page('gpt-analytics-reports', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-successful-referrer', 'gpt_successful_referrer_page');
         
-
-        // add_submenu_page('gpt-macao', 'Cấu hình chung', 'Cấu hình chung', 'manage_options', 'gpt-macao', 'gpt_config_page');
-        // add_submenu_page('gpt-macao', 'Cấu hình thông báo', 'Cấu hình thông báo', 'manage_options', 'gpt-cau-hinh-thong-bao', 'gpt_notice_config_page');
-        // add_submenu_page('gpt-macao', 'Cấu hình kênh BH', 'Cấu hình kênh BH', 'manage_options', 'gpt-sales-channels', 'gpt_render_sales_channels_page');
-        // add_submenu_page(
-        //     'gpt-macao',
-        //     'Duyệt mã cào',
-        //     'Duyệt mã cào',
-        //     'manage_options',
-        //     'gpt-browse-barcodes',
-        //     'gpt_render_duyet_barcode_page'
-        // );
-        // add_submenu_page('gpt-macao', 'DS mã cào', 'DS mã cào', 'manage_options', 'gpt-danh-sach-ma-cao', 'gpt_macao_list_page');
-        // add_submenu_page('gpt-macao', 'DSKH tích điểm', 'DSKH tích điểm', 'manage_options', 'gpt-khach-hang', 'gpt_customer_list_page');
-        // add_submenu_page('gpt-macao', 'DSKH đổi điểm', 'DSKH đổi điểm', 'manage_options', 'gpt-doi-diem-list', 'gpt_render_exchange_list_page');
-        // add_submenu_page('gpt-macao', 'DS cảnh báo', 'DS cảnh báo', 'manage_options', 'gpt-canh-bao-vi-tri', 'gpt_location_warnings_page');
-        // add_submenu_page('gpt-macao', 'DS người được giới thiệu', 'Người được giới thiệu', 'manage_options', 'gpt-nguoi-duoc-gioi-thieu', 'gpt_referral_list_page');
-        // add_submenu_page('gpt-macao', 'DS người giới thiệu thành công', 'Giới thiệu thành công', 'manage_options', 'gpt-nguoi-gioi-thieu-thanh-cong', 'gpt_successful_referrer_page');
     }   
 
 });
@@ -432,6 +389,11 @@ function gpt_notice_config_page() {
             update_option('gpt_success_notice_editor', $success_notice_content);
         }
 
+        if (isset($_POST['gpt_agree_terms_editor'])) {
+            $success_notice_content = wp_kses_post($_POST['gpt_agree_terms_editor']);
+            update_option('gpt_agree_terms_editor', $success_notice_content);
+        }
+
         if (!empty($_FILES['gpt_logo_image']['name'])) {
             $uploaded_logo = wp_handle_upload($_FILES['gpt_logo_image'], ['test_form' => false]);
             if (!isset($uploaded_logo['error'])) {
@@ -461,7 +423,8 @@ function gpt_notice_config_page() {
     }
 
     $notice_content          = get_option('gpt_error_notice_editor', '');
-    $success_notice_content  = get_option('gpt_success_notice_editor', ''); // Thêm biến mới
+    $success_notice_content  = get_option('gpt_success_notice_editor', '');
+    $gpt_agree_terms_editor  = get_option('gpt_agree_terms_editor', '');
     $messenger_link          = get_option('gpt_messenger_link', '');
     $logo_image_url          = get_option('gpt_logo_image_url', '');
     $messenger_icon_url      = get_option('gpt_messenger_icon_url', '');
@@ -530,6 +493,19 @@ function gpt_notice_config_page() {
                     <?php
                     wp_editor($success_notice_content, 'gpt_success_notice_editor', [
                         'textarea_name' => 'gpt_success_notice_editor',
+                        'media_buttons' => false,
+                        'textarea_rows' => 6,
+                        'tinymce' => true,
+                        'quicktags' => true
+                    ]);
+                    ?>                    
+                </div>
+                <hr>
+                <div class="form-group notice-section" style="margin-bottom: 20px; padding: 15px; background: #f0fff4; border-left: 4px solid #28a745; border-radius: 4px;">
+                    <label for="gpt_agree_terms_editor"><strong>🎉 Thông báo đồng ý điều khoản khi tích điểm:</strong></label>
+                    <?php
+                    wp_editor($gpt_agree_terms_editor, 'gpt_agree_terms_editor', [
+                        'textarea_name' => 'gpt_agree_terms_editor',
                         'media_buttons' => false,
                         'textarea_rows' => 6,
                         'tinymce' => true,

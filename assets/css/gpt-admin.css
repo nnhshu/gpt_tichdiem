@@ -724,6 +724,7 @@ a.button-danger:hover {
 /* Button styling */
 .form-section .button {
     margin-right: 10px;
+    min-height: 40px;
 }
 
 .form-section .button-primary {
@@ -1294,7 +1295,7 @@ input[type=week] {
 .form-group input[type="tel"],
 .form-group textarea {
     width: 100%;
-    padding: 12px 16px;
+    /* padding: 12px 16px; */
     border: 2px solid #e5e7eb;
     border-radius: 8px;
     font-size: 14px;

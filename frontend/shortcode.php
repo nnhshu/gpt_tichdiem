@@ -633,6 +633,7 @@ function gpt_lookup_point_of_user_shortcode() {
 
             let currentPageTich = 1;
             let currentPageDoi = 1;
+            let currentPageAffiliate = 1; // Thêm biến cho affiliate
             let perPage = 5;
 
             $('#gpt_lookup_point_form').on('submit', function(e) {
@@ -658,34 +659,10 @@ function gpt_lookup_point_of_user_shortcode() {
 
                 $('#search_result').html('<p>🔄 Đang tra cứu, vui lòng đợi...</p>');
 
-                fetchHistory(phone, currentPageTich, currentPageDoi);
+                fetchHistory(phone, currentPageTich, currentPageDoi, currentPageAffiliate);
             });
 
-            function fetchHistory(phone, page) {
-                let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-
-                $.post(ajaxurl, {
-                    action: 'gpt_lookup_point_ajax',
-                    phone: phone,
-                    page: page,
-                    per_page: perPage
-                }, function(response) {
-                    if (response.success) {
-                        let data = response.data;
-                        renderResult(phone, data);
-
-                        captcha_result = generateCaptcha();
-                        $('#captcha_answer').val('');
-
-                    } else {
-                        $('#search_result').html(`<p style="color:red;">${response.data}</p>`);
-                        captcha_result = generateCaptcha();
-                        $('#captcha_answer').val('');
-                    }
-                });
-            }
-
-            function fetchHistory(phone, pageTich, pageDoi) {
+            function fetchHistory(phone, pageTich, pageDoi, pageAffiliate = 1) {
                 let ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
 
                 $.post(ajaxurl, {
@@ -693,6 +670,7 @@ function gpt_lookup_point_of_user_shortcode() {
                     phone: phone,
                     page_tich: pageTich,
                     page_doi: pageDoi,
+                    page_affiliate: pageAffiliate, // Thêm tham số affiliate
                     per_page: perPage
                 }, function(response) {
                     if (response.success) {
@@ -714,79 +692,183 @@ function gpt_lookup_point_of_user_shortcode() {
                         <div class="flex align-middle box_info">
                             <div><span>📱 Số điện thoại:</span> <strong>${phone}</strong></div>
                             <div><span>✅ Tổng điểm của bạn:</span> <strong>${data.tong_diem} điểm</strong></div>
+                            <div><span>💰 Điểm tích lũy từ sản phẩm:</span> <strong>${data.diem_tich} điểm</strong></div>
+                            <div><span>🤝 Điểm Affiliate:</span> <strong>${data.diem_affiliate || 0} điểm</strong></div>
                             <div><span>🔁 Đã đổi:</span> <strong>${data.diem_doi} điểm</strong></div>
-                            <div><span>⭐ Điểm hiện có:</span> <strong>${data.diem_tich} điểm</strong></div>
+                            <div><span>⭐ Điểm còn lại:</span> <strong>${data.diem_con_lai} điểm</strong></div>
                         </div>
-                        <div style="margin-top: 20px; text-align: left;">
-                            <h4>Lịch sử Tích điểm:</h4>
-                            ${renderTable(data.lich_su_tich)}
-                            <div id="pagination_tich" style="margin-top: 10px; text-align: center;">
-                                ${data.total_pages_tich > 1 ? renderPagination(data.total_pages_tich, data.current_page_tich, 'tich') : ''}
+                        
+                        <!-- Tab Navigation -->
+                        <div class="tab-container" style="margin-top: 20px;">
+                            <div class="tab-nav" style="display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px;">
+                                <button class="tab-btn active" data-tab="tich" style="padding: 10px 20px; margin-right: 5px; border: none; background: #007cba; color: white; cursor: pointer;">
+                                    📈 Lịch sử Tích điểm
+                                </button>
+                                <button class="tab-btn" data-tab="doi" style="padding: 10px 20px; margin-right: 5px; border: none; background: #f1f1f1; color: #333; cursor: pointer;">
+                                    🎁 Lịch sử Đổi điểm
+                                </button>
+                                <button class="tab-btn" data-tab="affiliate" style="padding: 10px 20px; border: none; background: #f1f1f1; color: #333; cursor: pointer;">
+                                    🤝 Lịch sử Affiliate
+                                </button>
                             </div>
-                        </div>
+                            
+                            <!-- Tab Contents -->
+                            <div class="tab-content">
+                                <!-- Tab Tích điểm -->
+                                <div id="tab-tich" class="tab-pane active" style="display: block;">
+                                    <h4>📈 Lịch sử Tích điểm:</h4>
+                                    ${renderTable(data.lich_su_tich, 'tich')}
+                                    <div id="pagination_tich" style="margin-top: 10px; text-align: center;">
+                                        ${data.total_pages_tich > 1 ? renderPagination(data.total_pages_tich, data.current_page_tich, 'tich') : ''}
+                                    </div>
+                                </div>
 
-                        <div style="margin-top: 30px; text-align: left;">
-                            <h4>Lịch sử Đổi điểm:</h4>
-                            ${renderTable(data.lich_su_doi)}
-                            <div id="pagination_doi" style="margin-top: 10px; text-align: center;">
-                                ${data.total_pages_doi > 1 ? renderPagination(data.total_pages_doi, data.current_page_doi, 'doi') : ''}
+                                <!-- Tab Đổi điểm -->
+                                <div id="tab-doi" class="tab-pane" style="display: none;">
+                                    <h4>🎁 Lịch sử Đổi điểm:</h4>
+                                    ${renderTable(data.lich_su_doi, 'doi')}
+                                    <div id="pagination_doi" style="margin-top: 10px; text-align: center;">
+                                        ${data.total_pages_doi > 1 ? renderPagination(data.total_pages_doi, data.current_page_doi, 'doi') : ''}
+                                    </div>
+                                </div>
+
+                                <!-- Tab Affiliate -->
+                                <div id="tab-affiliate" class="tab-pane" style="display: none;">
+                                    <h4>🤝 Lịch sử Affiliate:</h4>
+                                    ${renderAffiliateTable(data.lich_su_affiliate || [])}
+                                    <div id="pagination_affiliate" style="margin-top: 10px; text-align: center;">
+                                        ${data.total_pages_affiliate > 1 ? renderPagination(data.total_pages_affiliate, data.current_page_affiliate, 'affiliate') : ''}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
 
                 $('#search_result').html(html);
 
+                // Tab switching functionality
+                $('.tab-btn').on('click', function() {
+                    let tabId = $(this).data('tab');
+                    
+                    // Update button styles
+                    $('.tab-btn').removeClass('active').css({
+                        'background': '#f1f1f1',
+                        'color': '#333'
+                    });
+                    $(this).addClass('active').css({
+                        'background': '#007cba',
+                        'color': 'white'
+                    });
+                    
+                    // Show/hide tab content
+                    $('.tab-pane').hide();
+                    $(`#tab-${tabId}`).show();
+                });
+
+                // Pagination functionality
                 $('.pagination-link').on('click', function() {
                     let type = $(this).data('type');
                     let page = parseInt($(this).data('page'));
+                    
                     if (type === 'tich') {
                         currentPageTich = page;
                     } else if (type === 'doi') {
                         currentPageDoi = page;
+                    } else if (type === 'affiliate') {
+                        currentPageAffiliate = page;
                     }
-                    fetchHistory(phone, currentPageTich, currentPageDoi);
+                    
+                    fetchHistory(phone, currentPageTich, currentPageDoi, currentPageAffiliate);
                 });
             }
 
-            function renderTable(list) {
+            function renderTable(list, type) {
                 if (list.length === 0) {
                     return '<p>Không có dữ liệu.</p>';
                 }
 
                 return `
-                                <div class="overflow-x-auto">
-                                    <table class="table bordered" style="width:100%; border-collapse: collapse;" border="1">
-                                        <thead>
-                                            <tr>
-                                                <th style="padding: 8px;">Loại giao dịch</th>
-                                                <th style="padding: 8px;">Số điểm</th>
-                                                <th style="padding: 8px;">Sản phẩm</th>
-                                                <th style="padding: 8px;">Thời gian</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            ${list.map(item => `
-                                                <tr>
-                                                    <td style="padding: 8px;">${item.loai_giao_dich}</td>
-                                                    <td style="padding: 8px;">${item.so_diem}</td>
-                                                    <td style="padding: 8px;">${item.product}</td>
-                                                    <td style="padding: 8px;">${item.created_at}</td>
-                                                </tr>
-                                            `).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            `;
+                    <div class="overflow-x-auto">
+                        <table class="table bordered" style="width:100%; border-collapse: collapse;" border="1">
+                            <thead>
+                                <tr>
+                                    <th style="padding: 8px;">Loại giao dịch</th>
+                                    <th style="padding: 8px;">Số điểm</th>
+                                    <th style="padding: 8px;">Sản phẩm</th>
+                                    <th style="padding: 8px;">Thời gian</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${list.map(item => `
+                                    <tr>
+                                        <td style="padding: 8px;">${item.loai_giao_dich}</td>
+                                        <td style="padding: 8px; color: ${type === 'doi' ? 'red' : 'green'};">
+                                            ${type === 'doi' ? '-' : '+'}${item.so_diem}
+                                        </td>
+                                        <td style="padding: 8px;">${item.product}</td>
+                                        <td style="padding: 8px;">${item.created_at}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            function renderAffiliateTable(list) {
+                if (list.length === 0) {
+                    return '<p>Bạn chưa có hoạt động affiliate nào.</p>';
+                }
+
+                return `
+                    <div class="overflow-x-auto">
+                        <table class="table bordered" style="width:100%; border-collapse: collapse;" border="1">
+                            <thead>
+                                <tr>
+                                    <th style="padding: 8px;">Loại giao dịch</th>
+                                    <th style="padding: 8px;">Số điểm</th>
+                                    <th style="padding: 8px;">Mô tả</th>
+                                    <th style="padding: 8px;">Tên người giới thiệu</th>
+                                    <th style="padding: 8px;">Lần đầu</th>
+                                    <th style="padding: 8px;">Lần cuối</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${list.map(item => `
+                                    <tr>
+                                        <td style="padding: 8px; color: #28a745;">
+                                            <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
+                                                ${item.loai_giao_dich}
+                                            </span>
+                                        </td>
+                                        <td style="padding: 8px; color: #28a745; font-weight: bold;">
+                                            +${item.so_diem}
+                                        </td>
+                                        <td style="padding: 8px;">${item.product}</td>
+                                        <td style="padding: 8px; font-weight: bold;">
+                                            ${item.ten_nguoi_gioi_thieu || 'N/A'}
+                                        </td>
+                                        <td style="padding: 8px; font-size: 12px;">
+                                            ${item.lan_dau_gioi_thieu || 'N/A'}
+                                        </td>
+                                        <td style="padding: 8px; font-size: 12px;">
+                                            ${item.lan_cuoi_gioi_thieu || 'N/A'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
             }
 
             function renderPagination(totalPages, currentPage, type) {
                 let html = '';
                 for (let i = 1; i <= totalPages; i++) {
                     if (i === currentPage) {
-                        html += `<span style="margin: 0 5px; font-weight: bold;">${i}</span>`;
+                        html += `<span style="margin: 0 5px; font-weight: bold; background: #007cba; color: white; padding: 5px 10px; border-radius: 3px;">${i}</span>`;
                     } else {
-                        html +=
-                            `<a href="javascript:void(0);" class="pagination-link" data-page="${i}" data-type="${type}" style="margin: 0 5px;">${i}</a>`;
+                        html += `<a href="javascript:void(0);" class="pagination-link" data-page="${i}" data-type="${type}" style="margin: 0 5px; padding: 5px 10px; text-decoration: none; border: 1px solid #ddd; border-radius: 3px;">${i}</a>`;
                     }
                 }
                 return html;
@@ -810,15 +892,18 @@ function gpt_lookup_point_ajax_callback() {
     $table = BIZGPT_PLUGIN_WP_LOGS;
     $exchange_table = BIZGPT_PLUGIN_WP_EXCHANGE_CODE_FOR_GIFT;
     $user_table = BIZGPT_PLUGIN_WP_SAVE_USERS;
+    $referral_table = BIZGPT_PLUGIN_WP_AFFILIATE_STATS; 
 
     $phone = sanitize_text_field($_POST['phone']);
 
     $page_tich = isset($_POST['page_tich']) ? intval($_POST['page_tich']) : 1;
     $page_doi = isset($_POST['page_doi']) ? intval($_POST['page_doi']) : 1;
+    $page_affiliate = isset($_POST['page_affiliate']) ? intval($_POST['page_affiliate']) : 1; // Thêm page cho affiliate
     $per_page = isset($_POST['per_page']) ? intval($_POST['per_page']) : 5;
 
     $offset_tich = ($page_tich - 1) * $per_page;
     $offset_doi = ($page_doi - 1) * $per_page;
+    $offset_affiliate = ($page_affiliate - 1) * $per_page; // Offset cho affiliate
 
     if (empty($phone)) {
         wp_send_json_error('Vui lòng nhập số điện thoại!');
@@ -835,20 +920,15 @@ function gpt_lookup_point_ajax_callback() {
 
     $diem_tich = intval($user_points->total_points);
     $diem_doi = intval($user_points->redeemed_points);
-    $tong_diem = $diem_tich + $diem_doi;
-    // $diem_con_lai = $diem_tich - $diem_doi;
-
-    // Lấy điểm tích từ bảng logs
-    // $diem_tich = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(point_change), 0) FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem'", $phone));
     
-    // Lấy điểm đổi từ bảng wp_gpt_exchange_gifts
-    // $diem_doi = $wpdb->get_var($wpdb->prepare("SELECT IFNULL(SUM(points), 0) FROM $exchange_table WHERE phone = %s", $phone));
-
-    // if ($diem_tich == 0 && $diem_doi == 0) {
-    //     wp_send_json_error('Không tìm thấy dữ liệu tích điểm cho số điện thoại này!');
-    // }
-
-    // $diem_con_lai = intval($diem_tich) - abs(intval($diem_doi));
+    // Tính tổng điểm affiliate
+    $diem_affiliate = $wpdb->get_var($wpdb->prepare(
+        "SELECT IFNULL(SUM(total_points_earned), 0) FROM $referral_table WHERE referrer_phone = %s",
+        $phone
+    ));
+    
+    $tong_diem = $diem_tich + $diem_affiliate;
+    $diem_con_lai = ($diem_tich + $diem_affiliate) - $diem_doi;
 
     // Lấy lịch sử tích điểm từ bảng logs
     $total_tich = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE phone_number = %s AND transaction_type = 'tich_diem'", $phone));
@@ -888,16 +968,55 @@ function gpt_lookup_point_ajax_callback() {
         ];
     }
 
+    // Lấy lịch sử tích điểm affiliate
+    $total_affiliate = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $referral_table WHERE referrer_phone = %s", $phone));
+    $total_pages_affiliate = ceil($total_affiliate / $per_page);
+
+    $lich_su_affiliate = $wpdb->get_results($wpdb->prepare(
+        "SELECT referrer_name, total_referrals, total_points_earned, last_referral_date, first_referral_date 
+         FROM $referral_table 
+         WHERE referrer_phone = %s 
+         ORDER BY last_referral_date DESC 
+         LIMIT %d OFFSET %d",
+        $phone, $per_page, $offset_affiliate
+    ));
+
+    $lich_su_affiliate_chi_tiet = [];
+    foreach ($lich_su_affiliate as $log) {
+        $lich_su_affiliate_chi_tiet[] = [
+            'so_diem' => intval($log->total_points_earned),
+            'loai_giao_dich' => 'Tích điểm Affiliate',
+            'product' => "Giới thiệu {$log->total_referrals} khách hàng",
+            'ten_nguoi_gioi_thieu' => $log->referrer_name,
+            'lan_dau_gioi_thieu' => $log->first_referral_date ? date('d/m/Y H:i', strtotime($log->first_referral_date)) : '',
+            'lan_cuoi_gioi_thieu' => $log->last_referral_date ? date('d/m/Y H:i', strtotime($log->last_referral_date)) : '',
+            'created_at' => $log->last_referral_date ? date('d/m/Y H:i', strtotime($log->last_referral_date)) : ''
+        ];
+    }
+
+    // Tạo lịch sử tổng hợp (tùy chọn)
+    $lich_su_tong_hop = array_merge($history_point_detail, $lich_su_doi_chi_tiet, $lich_su_affiliate_chi_tiet);
+    
+    // Sắp xếp theo thời gian (mới nhất trước)
+    usort($lich_su_tong_hop, function($a, $b) {
+        return strtotime(str_replace('/', '-', $b['created_at'])) - strtotime(str_replace('/', '-', $a['created_at']));
+    });
+
     wp_send_json_success([
         'diem_tich' => intval($diem_tich),
         'diem_doi' => abs(intval($diem_doi)),
+        'diem_affiliate' => intval($diem_affiliate),
         'tong_diem' => intval($tong_diem),
         'diem_con_lai' => max($diem_con_lai, 0),
         'lich_su_tich' => $history_point_detail,
         'lich_su_doi' => $lich_su_doi_chi_tiet,
+        'lich_su_affiliate' => $lich_su_affiliate_chi_tiet,
+        'lich_su_tong_hop' => $lich_su_tong_hop,
         'total_pages_tich' => $total_pages_tich,
         'current_page_tich' => $page_tich,
         'total_pages_doi' => $total_pages_doi,
-        'current_page_doi' => $page_doi
+        'current_page_doi' => $page_doi,
+        'total_pages_affiliate' => $total_pages_affiliate,
+        'current_page_affiliate' => $page_affiliate
     ]);
 }

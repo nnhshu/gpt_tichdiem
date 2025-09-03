@@ -1,8 +1,6 @@
 <?php 
 
 add_action('wp_ajax_check_macao_ajax', 'check_macao_ajax_callback');
-add_action('wp_ajax_check_affiliate_info', 'handle_check_affiliate_info');
-add_action('wp_ajax_nopriv_check_affiliate_info', 'handle_check_affiliate_info');
 
 add_action('wp_ajax_gpt_check_referrer', 'gpt_check_referrer_ajax');
 add_action('wp_ajax_nopriv_gpt_check_referrer', 'gpt_check_referrer_ajax');
@@ -19,18 +17,19 @@ add_shortcode('gpt_form_accumulate_code','gpt_form_accumulate_code');
 
 function check_macao_ajax_callback() {
     global $wpdb;
-
+    
     $table = BIZGPT_PLUGIN_WP_BARCODE;
     $code = sanitize_text_field($_POST['code']);
+    $affiliate_percent_per_referral = get_option('affiliate_percent_per_referral');
     
     $code_info = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM {$table} WHERE LOWER(barcode) = LOWER(%s)",
         $code
     ));
-
+    
     if ($code_info) {
         $custom_prod_id = $code_info->product_id;
-
+        
         $args = [
             'post_type' => 'product',
             'meta_query' => [
@@ -42,38 +41,43 @@ function check_macao_ajax_callback() {
             ],
             'posts_per_page' => 1
         ];
-
+        
         $products = get_posts($args);
-
+        
         if (!empty($products)) {
             $product = $products[0];
             $product_id = $product->ID;
             $product_name = $product->post_title;
             $product_image = get_the_post_thumbnail_url($product->ID, 'medium');
             $product_price = wc_get_price_to_display(wc_get_product($product_id));
-
+            
+            $points = intval($code_info->point);
+            $affiliate_percent = floatval($affiliate_percent_per_referral);
+            
+            if ($affiliate_percent == 0) {
+                $affiliate_points = $points;
+            } else {
+                $affiliate_points = ($affiliate_percent / 100) * $points;
+            }
+            
             $product_info = [
                 'name' => $product_name,
                 'custom_prod_id' => $custom_prod_id,
                 'price' => wc_price($product_price),
                 'image' => $product_image ? $product_image : wc_placeholder_img_src(),
-                'points' => intval($code_info->point)
+                'points' => $points,
+                'affiliate_points' => round($affiliate_points, 2)
             ];
-
+            
             wp_send_json_success([
                 'channel' => $code_info->channel,
                 'province' => $code_info->province,
                 'product' => $product_info,
                 'show_store_section' => in_array($code_info->channel, ['G', 'S', 'T']),
                 'show_referrer_section' => !in_array($code_info->channel, ['G', 'S', 'T']),
+                'affiliate_percent' => $affiliate_percent,
             ]);
-
-            // wp_send_json_success([
-            //     'name' => $product_name,
-            //     'custom_prod_id' => $custom_prod_id,
-            //     'price' => wc_price($product_price),
-            //     'image' => $product_image ? $product_image : wc_placeholder_img_src()
-            // ]);
+            
         } else {
             wp_send_json_error('Không tìm thấy sản phẩm tương ứng.');
         }
@@ -143,7 +147,7 @@ function enhanced_bizgpt_insert_point_log($data = array()) {
     return $log_result;
 }
 
-function send_location_warning_to_admin($code, $username, $phone, $expected_province, $actual_province, $full_address, $product_name, $store_name) {
+function send_location_warning_to_admin($code, $username, $phone, $expected_province, $actual_province, $full_address, $product_name, $store_name, $location_mismatch, $location_warning) {
     global $wpdb;
     
     // Tạo bảng cảnh báo nếu chưa có
@@ -257,10 +261,10 @@ function gpt_form_accumulate_code() {
     <?php if (!isset($client_id) || empty($client_id)): ?>
     <?php
         $notice = get_option('gpt_error_notice_editor');
-        $messenger_link = get_option('gpt_messenger_link', 'https://m.me/700792956451509?ref=.f.2dfe2f2acdbb4fa281d6c5bd018478f0');
-        $logo_image_url = get_option('gpt_logo_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/Bimbosan_Logo_no-Claim-1024x267.png');
-        $messenger_icon_url = get_option('gpt_messenger_icon_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/07/logo-messenger.png');
-        $display_image_url = get_option('gpt_display_image_url', 'https://bimbosan.superhub.vn/wp-content/uploads/sites/1108/2025/06/67b49d34db548cf82c4c01e5_cows.png');
+        $messenger_link = get_option('gpt_messenger_link', '');
+        $logo_image_url = get_option('gpt_logo_image_url', '');
+        $messenger_icon_url = get_option('gpt_messenger_icon_url', '');
+        $display_image_url = get_option('gpt_display_image_url', '');
         ob_start();
     ?>
         <?php  wp_enqueue_style('gpt-form-style', plugin_dir_url(__FILE__) . 'form.css'); ?>        
@@ -299,20 +303,15 @@ function gpt_form_accumulate_code() {
         $response_success = "";
         $response_success_1 = "";
         $response = "";
-
+        $logo_image_url = get_option('gpt_logo_image_url', '');
         $affiliate_enabled = get_option('affiliate_enabled', 0);
         $affiliate_points = get_option('affiliate_points_per_referral', 10);
         $min_points_required = get_option('affiliate_min_points_required', 1);
         $title_message = get_option('gpt_success_notice_editor', '');
+        $gpt_agree_terms_editor = get_option('gpt_agree_terms_editor', '');
         // $barcode_from_url = isset($_GET['barcode']) ? sanitize_text_field($_GET['barcode']) : '';
 
         $current_barcode = gpt_get_saved_barcode();
-
-        // if (empty($barcode)) {
-        //     $ip = gpt_get_user_ip();
-        //     $transient_key = 'gpt_barcode_' . md5($ip);
-        //     $barcode = get_transient($transient_key);
-        // }
 
         if(isset($_GET['code']) && isset($_GET['token'])){
             global $wpdb;
@@ -512,12 +511,6 @@ function gpt_form_accumulate_code() {
                     $original_points = intval($code_info->point);
                     $bonus_points = 0;
 
-                    // if ($is_first_time && $affiliate_enabled && !empty($referrer_phone)) {
-                    //     $bonus_percent = floatval(get_option('affiliate_percent_per_new_user', 0));
-                    //     if ($bonus_percent > 0) {
-                    //         $bonus_points = round($original_points * ($bonus_percent / 100));
-                    //     }
-                    // }
                     if ($is_first_time) {
                         $bonus_percent = floatval(get_option('affiliate_percent_per_new_user', 0));
 
@@ -620,7 +613,7 @@ function gpt_form_accumulate_code() {
 
                     // THÔNG BÁO CHO ADMIN NẾU CÓ VẤN ĐỀ VỊ TRÍ
                     if ($location_mismatch) {
-                        send_location_warning_to_admin($code, $username, $phone_number, $code_info->province, $user_current_province, $user_full_address, $product_name, $store_name);
+                        send_location_warning_to_admin($code, $username, $phone_number, $code_info->province, $user_current_province, $user_full_address, $product_name, $store_name, $location_mismatch, $location_warning);
                     }
 
                     $total_points = bizgpt_get_current_points($phone_number);
@@ -628,7 +621,17 @@ function gpt_form_accumulate_code() {
                     
                     $location_note = $location_mismatch ? "\n⚠️ Lưu ý: Vị trí tích điểm khác với khu vực dự kiến của mã." : "";
                     
-                    $response_message = "Chúc mừng bạn đã tích điểm thành công.\n☀️ Thông tin khách hàng :\n🏠 Tên shop : $store_name\n📱Số điện thoại : $phone_number\n🎡 Tên sản phẩm tích điểm : $product_name\n🎯 Địa chỉ : $address\n📝 Mã Cào  : $code\n🌟 Số điểm của bạn là : $total_points\n📍Để đổi điểm, bạn nhắn: Đổi điểm\n📍Để tích điểm, bạn nhắn: Tích điểm\n📍Để kiểm tra điểm, bạn nhắn: Kiểm tra điểm\n✨Mọi thắc mắc bạn vui lòng liên hệ theo SĐT: 1900636605\n----------\n💐 Cảm ơn bạn đã tham gia chương trình.$location_note";
+                    $response_data = [
+                        'message_intro' => 'Chúc mừng bạn đã tích điểm thành công.',
+                        'store_name'    => $store_name,
+                        'phone_number'  => $phone_number,
+                        'product_name'  => $product_name,
+                        'address'       => $address,
+                        'code'          => $code,
+                        'total_points'  => $total_points,
+                        'location_note' => $location_note,
+                        'support_phone' => '1900636605',
+                    ];
                     
                     $json_content = '
                         "messages": [
@@ -706,9 +709,6 @@ function gpt_form_accumulate_code() {
                             <h3>🤝 Có người giới thiệu không?</h3>
                             <div class="affiliate-intro">
                                 <div class="affiliate-benefit">
-                                    <strong>🎁 Ưu đãi đặc biệt:</strong> 
-                                    Nếu có người giới thiệu, họ sẽ nhận <strong><?php echo $affiliate_points; ?> điểm thưởng</strong> 
-                                    khi bạn tích điểm thành công!
                                 </div>
                             </div>
                             <div class="form-group">
@@ -739,14 +739,30 @@ function gpt_form_accumulate_code() {
                         <span><?php echo $response; ?></span>
                     </div>
                 <?php endif; ?>
-                <?php if($response_message) : ?>
+                <?php if (!empty($response_data)) : ?>
                     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
                     <script>
-                        const data = `<?php echo $response_message; ?>`;
+                        const data = <?php echo json_encode($response_data, JSON_UNESCAPED_UNICODE); ?>;
+
+                        // Tự dựng HTML đẹp hơn
+                        const htmlContent = `
+                            <p>☀️ <b>${data.message_intro}</b></p>
+                            <p>🏠 <b>Tên shop:</b> ${data.store_name}</p>
+                            <p>📱 <b>Số điện thoại:</b> ${data.phone_number}</p>
+                            <p>🎡 <b>Tên sản phẩm tích điểm:</b> ${data.product_name}</p>
+                            <p>🎯 <b>Địa chỉ:</b> ${data.address}</p>
+                            <p>📝 <b>Mã Cào:</b> ${data.code}</p>
+                            <p>🌟 <b>Số điểm của bạn:</b> ${data.total_points}</p>
+                            <hr>
+                            <p>✨ Mọi thắc mắc vui lòng liên hệ: ${data.support_phone}</p>
+                            <p>${data.location_note}</p>
+                            <p>💐 Cảm ơn bạn đã tham gia chương trình.</p>
+                        `;
+
                         Swal.fire({
                             title: `<?php echo $title_message; ?>`,
-                            html: `<?php echo $response_message; ?>`,
-                            imageUrl: '<?php echo plugin_dir_url(__FILE__); ?>/image/bo_dt.png',
+                            html: htmlContent,
+                            imageUrl: '<?php echo esc_url($logo_image_url); ?>',
                             imageWidth: 128,
                             imageHeight: 128,
                             showCloseButton: true,
@@ -887,12 +903,13 @@ function gpt_form_accumulate_code() {
                                         <div class="prod_item_left"><img src="${productInfo.image}" alt="${productInfo.name}"></div>
                                         <div class="prod_item_right">
                                             <h4 class="">Thông tin sản phẩm:</h4>
-                                            <p><strong>${productInfo.name} - ${productInfo.custom_prod_id}</strong></p>
+                                            <p><strong>${productInfo.name}</strong></p>
                                             <h5 class="">Giá niêm yết:</h5>
                                             <p><strong>${productInfo.price}</strong></p>
                                         </div>
                                     </div>
                                 `);
+                                $('.affiliate-benefit').html(`🎁 Ưu đãi đặc biệt: Nếu có người giới thiệu, họ sẽ nhận <strong>${productInfo.affiliate_points} điểm thưởng</strong> khi bạn tích điểm thành công!`);
                             } else {
                                 $('#product_info').html(`<p class="text-red-500 mt-2">${response.data}</p>`);
                             }
@@ -1112,7 +1129,7 @@ function gpt_form_accumulate_code() {
                                     $('#product_info').html(`
                                         <div class="prod_item">
                                             <div class="prod_item_left"><img src="${productInfo.image}" alt="${productInfo.name}"></div>
-                                            <div class="prod_item_right"><h4 class="">Thông tin sản phẩm:</h4><p><strong>${productInfo.name} - ${productInfo.custom_prod_id}</strong></p><h5 class="">Giá niêm yết:</h5><p><strong>${productInfo.price}</strong></p></div>
+                                            <div class="prod_item_right"><h4 class="">Thông tin sản phẩm:</h4><p><strong>${productInfo.name}</strong></p><h5 class="">Giá niêm yết:</h5><p><strong>${productInfo.price}</strong></p></div>
                                         </div>
                                     `);
                                     if(response.data.show_store_section == true){
@@ -1185,77 +1202,130 @@ function gpt_form_accumulate_code() {
 
                 $('#btn_tichdiem').on('click', function(e) {
                     e.preventDefault();
-                    if ($('#referrer_phone').val() != "") {
-                        const userPhone = $('#phone_number').val().trim();
-                        const referrer_phone =$('#referrer_phone').val();
-                        const affiliatePoints = <?php echo $affiliate_points; ?>;
-
-                        if (userPhone === '') {
-                            $('#referrer_name_group').css('display','none');
-                            $('#affiliate-preview').css('display','none');
-                            return;
-                        }
-                        
-                        if (!/^[0-9+\-\s()]{8,15}$/.test(userPhone)) {
-                            showAffiliateStatus('❌ Số điện thoại không hợp lệ', 'error');
-                            return;
-                        }
-                        
-                        if (referrer_phone && userPhone === referrer_phone) {
-                            showAffiliateStatus('❌ Không thể tự giới thiệu chính mình', 'error');
-                            return;
-                        }
-                        
-                        $('#referrer_name_group').css('display','block');
-                        showAffiliateStatus(`✅ Người giới thiệu sẽ nhận ${affiliatePoints} điểm khi bạn tích điểm thành công!`, 'success');
-                        $( "#biz_form_tichdiem" ).trigger( "submit" );
-                    } else{
-                        $( "#biz_form_tichdiem" ).trigger( "submit" );
+                    
+                    // Kiểm tra các trường bắt buộc
+                    const code = $('#code').val().trim();
+                    const token = $('#token').val().trim();
+                    const username = $('#username').val().trim();
+                    const phone_number = $('#phone_number').val().trim();
+                    const address = $('#address').val().trim();
+                    
+                    // Validate các trường bắt buộc
+                    if (!code) {
+                        Swal.fire({
+                            title: 'Thiếu thông tin',
+                            text: 'Vui lòng nhập mã định danh sản phẩm',
+                            icon: 'warning',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
                     }
-                })
+                    
+                    if (!token) {
+                        Swal.fire({
+                            title: 'Thiếu thông tin',
+                            text: 'Vui lòng nhập token lớp tráng bạc trên tem',
+                            icon: 'warning',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+                    
+                    if (!username) {
+                        Swal.fire({
+                            title: 'Thiếu thông tin',
+                            text: 'Vui lòng nhập họ và tên',
+                            icon: 'warning',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+                    
+                    if (!phone_number) {
+                        Swal.fire({
+                            title: 'Thiếu thông tin',
+                            text: 'Vui lòng nhập số điện thoại',
+                            icon: 'warning',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+                    
+                    // Validate số điện thoại
+                    if (!/^[0-9+\-\s()]{8,15}$/.test(phone_number)) {
+                        Swal.fire({
+                            title: 'Số điện thoại không hợp lệ',
+                            text: 'Vui lòng nhập số điện thoại hợp lệ',
+                            icon: 'error',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+                    
+                    if (!address) {
+                        Swal.fire({
+                            title: 'Thiếu thông tin',
+                            text: 'Vui lòng nhập địa chỉ',
+                            icon: 'warning',
+                            confirmButtonText: 'OK'
+                        });
+                        return;
+                    }
+                    
+                    // Kiểm tra người giới thiệu nếu có
+                    const referrer_phone = $('#referrer_phone') ? $('#referrer_phone').val() : null;
+                    if (referrer_phone !== null) {
+                        if (phone_number === referrer_phone) {
+                            Swal.fire({
+                                title: 'Lỗi người giới thiệu',
+                                text: 'Không thể tự giới thiệu chính mình',
+                                icon: 'error',
+                                confirmButtonText: 'OK'
+                            });
+                            return;
+                        }
+                        
+                        // Kiểm tra người giới thiệu có tồn tại không
+                        const referrerInfo = $('#referrer_info').text();
+                        if (referrerInfo.includes('Không tìm thấy')) {
+                            Swal.fire({
+                                title: 'Người giới thiệu không tồn tại',
+                                text: 'Số điện thoại người giới thiệu không tồn tại trong hệ thống',
+                                icon: 'error',
+                                confirmButtonText: 'OK'
+                            });
+                            return;
+                        }
+                    }
+                    
+                    Swal.fire({
+                        title: 'Xác nhận tích điểm',
+                        html: `<?php echo $gpt_agree_terms_editor; ?>`,
+                        icon: 'question',
+                        showCloseButton: true,
+                        showCancelButton: true,
+                        cancelButtonText: 'Hủy bỏ',
+                        confirmButtonText: 'Đồng ý và tích điểm',
+                        reverseButtons: true
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            $("#biz_form_tichdiem").off('submit').submit();
+                        }
+                    });
+                });
 
                 function showAffiliateStatus(message, type) {
                     $('#affiliate-preview').html(message);
                     $('#affiliate-preview').css('display','block');
                 }
-
-                function checkReferrerExists(phone) {
-                    // AJAX call to check if referrer exists
-                    fetch(ajaxurl || '/wp-admin/admin-ajax.php', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: new URLSearchParams({
-                            action: 'check_affiliate_info',
-                            phone: phone,
-                            nonce: '<?php echo wp_create_nonce('affiliate_check_nonce'); ?>'
-                        })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            const info = data.data;
-                            if (info.exists && info.name) {
-                                referrerName.value = info.name;
-                                showAffiliateStatus(`✅ Người giới thiệu: ${info.name} (đã giới thiệu ${info.total_referrals} lần)`, 'success');
-                            }
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error checking referrer:', error);
-                    });
-                }
             });
 
         </script>
     <?php
-    return ob_get_clean();
+        return ob_get_clean();
+        endif;
     ?>
-
-    <?php endif; ?>
-    <?php
-    
+    <?php 
 }
 
 function gpt_check_referrer_ajax() {
@@ -1275,44 +1345,6 @@ function gpt_check_referrer_ajax() {
         wp_send_json_success(['name' => $row->full_name]);
     } else {
         wp_send_json_error(['message' => 'Không tìm thấy']);
-    }
-}
-
-function handle_check_affiliate_info() {
-    if (!wp_verify_nonce($_POST['nonce'], 'affiliate_check_nonce')) {
-        wp_send_json_error(['message' => 'Lỗi bảo mật']);
-    }
-    
-    $phone = sanitize_text_field($_POST['phone']);
-    
-    if (empty($phone)) {
-        wp_send_json_error(['message' => 'Số điện thoại không hợp lệ']);
-    }
-    
-    $user_info = check_user_exists_for_affiliate($phone);
-    $affiliate_points = get_option('affiliate_points_per_referral', 10);
-    
-    if ($user_info['exists']) {
-        $message = "Người giới thiệu: {$user_info['name']} sẽ nhận {$affiliate_points} điểm.";
-        if ($user_info['is_verified']) {
-            $message .= " (Thành viên từ " . date('d/m/Y', strtotime($user_info['member_since'])) . ", đã giới thiệu {$user_info['total_referrals']} lần)";
-        } else {
-            $message .= " (Thành viên mới)";
-        }
-        
-        wp_send_json_success([
-            'exists' => true,
-            'name' => $user_info['name'],
-            'total_referrals' => $user_info['total_referrals'],
-            'points_info' => $affiliate_points . ' điểm cố định',
-            'message' => $message
-        ]);
-    } else {
-        wp_send_json_success([
-            'exists' => false,
-            'points_info' => $affiliate_points . ' điểm cố định',
-            'message' => "Người giới thiệu sẽ nhận {$affiliate_points} điểm khi bạn tích điểm thành công."
-        ]);
     }
 }
 

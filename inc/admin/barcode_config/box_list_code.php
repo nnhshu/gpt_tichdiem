@@ -34,34 +34,80 @@ function gpt_export_box_barcode_with_image() {
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BOX_MANAGER;
 
-    $rows = $wpdb->get_results("SELECT * FROM $table WHERE status = 'unused' ORDER BY id DESC");
+    // Xây dựng điều kiện WHERE dựa trên các filter được gửi
+    $where_conditions = ["status = 'unused'"];
+    $params = [];
+
+    // Kiểm tra các filter từ POST data
+    if (!empty($_POST['export_session'])) {
+        $where_conditions[] = "session = %s";
+        $params[] = sanitize_text_field($_POST['export_session']);
+    }
+
+    if (!empty($_POST['export_search_barcode'])) {
+        $where_conditions[] = "barcode LIKE %s";
+        $params[] = '%' . $wpdb->esc_like(sanitize_text_field($_POST['export_search_barcode'])) . '%';
+    }
+
+    if (!empty($_POST['export_status'])) {
+        // Ghi đè điều kiện status mặc định
+        $where_conditions[0] = "status = %s";
+        $params = array_merge([sanitize_text_field($_POST['export_status'])], array_slice($params, 0));
+    }
+
+    if (!empty($_POST['export_from_date']) && !empty($_POST['export_to_date'])) {
+        $where_conditions[] = "DATE(created_at) BETWEEN %s AND %s";
+        $params[] = sanitize_text_field($_POST['export_from_date']);
+        $params[] = sanitize_text_field($_POST['export_to_date']);
+    }
+
+    // Tạo query
+    $where_clause = implode(' AND ', $where_conditions);
+    $query = "SELECT * FROM $table WHERE $where_clause ORDER BY id DESC";
+
+    if (!empty($params)) {
+        $rows = $wpdb->get_results($wpdb->prepare($query, ...$params));
+    } else {
+        $rows = $wpdb->get_results($query);
+    }
 
     if (empty($rows)) {
-        wp_die('Không có dữ liệu để xuất.');
+        wp_die('Không có dữ liệu để xuất với các điều kiện đã chọn.');
     }
 
     $spreadsheet = new Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
 
     // Header
-    $headers = ['Mã định danh', "Token - Tráng bạc", 'Điểm', 'Trạng thái', 'Ngày tạo', 'Link QR', 'Link Barcode'];
+    $headers = ['Mã định danh', "Token - Tráng bạc", 'Điểm', 'Trạng thái', 'Phiên', 'Ngày tạo', 'Link QR', 'Link Barcode'];
     $sheet->fromArray($headers, NULL, 'A1');
 
     $rowIndex = 2;
     foreach ($rows as $row) {
         $sheet->setCellValue("A$rowIndex", $row->barcode);
-        $sheet->setCellValue("B$rowIndex", $row->token);
-        $sheet->setCellValue("C$rowIndex", $row->point);
+        $sheet->setCellValue("B$rowIndex", $row->token ?? '');
+        $sheet->setCellValue("C$rowIndex", $row->point ?? '');
         $sheet->setCellValue("D$rowIndex", $row->status);
-        $sheet->setCellValue("E$rowIndex", $row->created_at);
-        $sheet->setCellValue("F$rowIndex", $row->qr_code_url);
-        $sheet->setCellValue("G$rowIndex", $row->barcode_url);
+        $sheet->setCellValue("E$rowIndex", $row->session);
+        $sheet->setCellValue("F$rowIndex", $row->created_at);
+        $sheet->setCellValue("G$rowIndex", $row->qr_code_url);
+        $sheet->setCellValue("H$rowIndex", $row->barcode_url);
         $rowIndex++;
     }
 
+    // Tạo tên file với thông tin filter
+    $filename = 'box_barcode_export';
+    if (!empty($_POST['export_session'])) {
+        $filename .= '_session_' . sanitize_file_name($_POST['export_session']);
+    }
+    if (!empty($_POST['export_status'])) {
+        $filename .= '_' . sanitize_file_name($_POST['export_status']);
+    }
+    $filename .= '_' . date('Y-m-d_H-i-s') . '.xlsx';
+
     // Header Excel để xuất file
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="box_barcode_export_links.xlsx"');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Cache-Control: max-age=0');
 
     $writer = new Xlsx($spreadsheet);
@@ -70,11 +116,6 @@ function gpt_export_box_barcode_with_image() {
 }
 
 function gpt_box_barcode_list_page() {
-    if (isset($_POST['gpt_export_excel'])) {
-        gpt_export_box_barcode_excel();
-        exit;
-    }
-
     global $wpdb;
     $table = BIZGPT_PLUGIN_WP_BOX_MANAGER;
 
@@ -82,38 +123,43 @@ function gpt_box_barcode_list_page() {
     $per_page = 20;
     $offset = ($paged - 1) * $per_page;
 
-    $where = '1=1';
+    // Xây dựng điều kiện WHERE
+    $where_conditions = [];
     $search_params = [];
     
     // Thêm search theo barcode
     if (!empty($_GET['search_barcode'])) {
         $search_barcode = sanitize_text_field($_GET['search_barcode']);
-        $where .= " AND barcode LIKE %s";
+        $where_conditions[] = "barcode LIKE %s";
         $search_params[] = '%' . $wpdb->esc_like($search_barcode) . '%';
     }
     
     if (!empty($_GET['status'])) {
-        $where .= " AND status = %s";
+        $where_conditions[] = "status = %s";
         $search_params[] = $_GET['status'];
     }
-    if (!empty($_GET['product_id'])) {
-        $where .= " AND product_id = %s";
-        $search_params[] = $_GET['product_id'];
-    }
+
     if (!empty($_GET['session'])) {
-        $where .= " AND session = %s";
+        $where_conditions[] = "session = %s";
         $search_params[] = $_GET['session'];
     }
     if (!empty($_GET['from_date']) && !empty($_GET['to_date'])) {
-        $where .= " AND DATE(created_at) BETWEEN %s AND %s";
+        $where_conditions[] = "DATE(created_at) BETWEEN %s AND %s";
         $search_params[] = $_GET['from_date'];
         $search_params[] = $_GET['to_date'];
     }
 
+    // Tạo WHERE clause
+    $where_clause = '';
+    if (!empty($where_conditions)) {
+        $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+    }
+
     // Xây dựng query với parameters
-    $query = "SELECT * FROM $table WHERE $where ORDER BY id DESC LIMIT %d OFFSET %d";
-    $count_query = "SELECT COUNT(*) FROM $table WHERE $where";
+    $query = "SELECT * FROM $table $where_clause ORDER BY id DESC LIMIT %d OFFSET %d";
+    $count_query = "SELECT COUNT(*) FROM $table $where_clause";
     
+    // Thêm LIMIT và OFFSET vào parameters
     $all_params = array_merge($search_params, [$per_page, $offset]);
     
     if (!empty($search_params)) {
@@ -125,6 +171,9 @@ function gpt_box_barcode_list_page() {
     }
     
     $total_pages = ceil($total / $per_page);
+
+    // Lấy danh sách sessions cho dropdown
+    $sessions = $wpdb->get_col("SELECT DISTINCT session FROM $table ORDER BY session DESC");
 
     ?>
     <h1>Danh sách mã định danh thùng hàng</h1>
@@ -209,7 +258,6 @@ function gpt_box_barcode_list_page() {
                 <select name="session" class="gpt-select2">
                     <option value="">Tất cả</option>
                     <?php
-                    $sessions = $wpdb->get_col("SELECT DISTINCT session FROM $table ORDER BY session DESC");
                     foreach ($sessions as $session) {
                         $selected = ($_GET['session'] ?? '') == $session ? 'selected' : '';
                         echo "<option value='{$session}' $selected>{$session}</option>";
@@ -234,12 +282,74 @@ function gpt_box_barcode_list_page() {
         </form>
     </div>
     
+    <!-- Export Form với Modal -->
+    <div id="export-modal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+        <div style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 500px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">📥 Xuất File Excel</h3>
+                <span id="close-modal" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+            </div>
+            
+            <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" id="export-form">
+                <input type="hidden" name="action" value="gpt_export_box_barcode_excel">
+                
+                <!-- Chọn phiên -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Chọn phiên:</label>
+                    <select name="export_session" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">🔄 Tất cả phiên</option>
+                        <?php foreach ($sessions as $session): ?>
+                            <option value="<?php echo esc_attr($session); ?>" <?php selected($_GET['session'] ?? '', $session); ?>>
+                                📦 <?php echo esc_html($session); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
+                <!-- Chọn trạng thái -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Chọn trạng thái:</label>
+                    <select name="export_status" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="">🔄 Tất cả trạng thái</option>
+                        <option value="pending" <?php selected($_GET['status'] ?? '', 'pending'); ?>>⏳ Chờ duyệt</option>
+                        <option value="unused" <?php selected($_GET['status'] ?? '', 'unused'); ?>>✅ Chưa sử dụng</option>
+                        <option value="used" <?php selected($_GET['status'] ?? '', 'used'); ?>>❌ Đã sử dụng</option>
+                    </select>
+                </div>
+                
+                <!-- Tìm kiếm barcode -->
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Tìm kiếm mã barcode:</label>
+                    <input type="text" name="export_search_barcode" value="<?php echo esc_attr($_GET['search_barcode'] ?? ''); ?>" 
+                           placeholder="Để trống để xuất tất cả" 
+                           style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+                
+                <!-- Khoảng thời gian -->
+                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Từ ngày:</label>
+                        <input type="date" name="export_from_date" value="<?php echo esc_attr($_GET['from_date'] ?? ''); ?>" 
+                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Đến ngày:</label>
+                        <input type="date" name="export_to_date" value="<?php echo esc_attr($_GET['to_date'] ?? ''); ?>" 
+                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                </div>
+                
+                <div style="text-align: right;">
+                    <button type="button" id="cancel-export" class="button" style="margin-right: 10px;">Hủy</button>
+                    <button type="submit" class="button button-primary">📥 Xuất Excel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
     <!-- Action Buttons -->
     <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>" style="margin: 0;">
-            <input type="hidden" name="action" value="gpt_export_box_barcode_excel">
-            <button type="submit" class="button button-primary">📥 Xuất File Excel</button>
-        </form>
+        <button type="button" id="show-export-modal" class="button button-primary">📥 Xuất File Excel</button>
         
         <button type="button" id="gpt_delete_selected" class="button button-danger alert">
             🗑️ Xóa các mã đã chọn
@@ -261,8 +371,8 @@ function gpt_box_barcode_list_page() {
             <thead>
                 <tr>
                     <th><input type="checkbox" id="gpt_check_all"></th>
-                    <!-- <th>ID</th> -->
                     <th>Mã định danh</th>
+                    <th>Phiên</th>
                     <th>Trạng thái</th>
                     <th>Ngày tạo</th>
                     <th>Link QR</th>
@@ -287,6 +397,11 @@ function gpt_box_barcode_list_page() {
                             ?>
                         </td>
                         <td>
+                            <span style="background: #e8f4fd; color: #0073aa; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
+                                <?php echo esc_html($row->session); ?>
+                            </span>
+                        </td>
+                        <td>
                             <?php if ($row->status == 'unused') : ?>
                                 <span class="gpt-badge gpt-badge-success">Chưa sử dụng</span>
                             <?php elseif($row->status == 'pending') : ?>
@@ -302,7 +417,7 @@ function gpt_box_barcode_list_page() {
                     <?php endforeach; ?>
                 <?php else : ?>
                     <tr>
-                        <td colspan="6" style="text-align:center; font-style: italic; padding: 20px;">
+                        <td colspan="7" style="text-align:center; font-style: italic; padding: 20px;">
                             <?php 
                             if (!empty($_GET['search_barcode'])) {
                                 echo '🔍 Không tìm thấy mã Box barcode "' . esc_html($_GET['search_barcode']) . '"';
@@ -344,20 +459,32 @@ function gpt_box_barcode_list_page() {
     ?>
     
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const form = document.getElementById('gpt-export-form');
-            const loading = document.getElementById('gpt-export-loading');
-
-            if (form) {
-                form.addEventListener('submit', function () {
-                    loading.style.display = 'block';
-                });
-            }
-        });
-    </script>
-
-    <script>
         jQuery(document).ready(function($) {
+            // Export Modal functionality
+            $('#show-export-modal').on('click', function() {
+                $('#export-modal').show();
+            });
+            
+            $('#close-modal, #cancel-export').on('click', function() {
+                $('#export-modal').hide();
+            });
+            
+            // Close modal when clicking outside
+            $('#export-modal').on('click', function(e) {
+                if (e.target === this) {
+                    $(this).hide();
+                }
+            });
+            
+            // Export form submission
+            $('#export-form').on('submit', function() {
+                $('#export-modal').hide();
+                $('#gpt-export-loading').show();
+                setTimeout(function() {
+                    $('#gpt-export-loading').hide();
+                }, 2000);
+            });
+            
             // Toggle advanced filters
             $('#toggle-filters').on('click', function() {
                 $('.advanced-filters').toggle();

@@ -401,4 +401,20 @@ function debug_user_capabilities() {
     }
 }
 add_action('wp_footer', 'debug_user_capabilities');
-add_action('admin_footer', 'debug_user_capabilities');
+function manage_posts_access_for_warehouse_roles() {
+    $user = wp_get_current_user();
+    $restricted_roles = array('quan_ly_kho', 'nhan_vien_kho');
+    
+    if (array_intersect($restricted_roles, $user->roles) && !current_user_can('administrator')) {
+        
+        remove_menu_page('edit.php');
+        
+        global $pagenow;
+        if ($pagenow == 'edit.php' && !isset($_GET['post_type'])) {
+            wp_redirect(admin_url());
+            exit;
+        }
+    }
+}
+add_action('admin_menu', 'manage_posts_access_for_warehouse_roles');
+add_action('admin_init', 'manage_posts_access_for_warehouse_roles');

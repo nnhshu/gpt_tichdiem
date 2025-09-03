@@ -19,6 +19,8 @@ function register_order_check_post_type() {
         'show_in_menu' => 'gpt-manager-tem',
         'supports' => array('title'),
         'has_archive' => true,
+        'capability_type' => 'post', // BẮT BUỘC
+        'map_meta_cap' => true,
     ));
 }
 add_action('init', 'register_order_check_post_type');
@@ -241,18 +243,6 @@ function render_order_check_fields($post) {
             ?>
         </div>
     </p>
-
-    <?php
-        $logs = get_post_meta($post->ID, '_inventory_logs', true);
-        if (!empty($logs)) {
-            echo '<div style="background:#f9f9f9;padding:10px;margin-top:20px;border:1px solid #ddd;">';
-            echo '<h4>Lịch sử cập nhật đơn hàng:</h4><ul>';
-            foreach ($logs as $log) {
-                echo '<li>' . esc_html($log) . '</li>';
-            }
-            echo '</ul></div>';
-        }
-    ?>
 
     <script>
         jQuery(document).ready(function($){
@@ -725,25 +715,46 @@ add_action('add_meta_boxes', function() {
     add_meta_box('order_status_box', 'Trạng thái đơn hàng', 'render_order_status_box', 'order_check', 'side');
     add_meta_box('order_logs_box', 'Lịch sử trạng thái đơn', 'render_order_logs_box', 'order_check', 'side');
     add_meta_box('order_check_fields', 'Thông tin đơn hàng', 'render_order_check_fields', 'order_check', 'normal', 'default');
+    add_meta_box(
+        'order_logs_metabox',
+        'Nhật ký nhập hàng cho thùng',
+        'display_order_logs_metabox',
+        'order_check',
+        'normal',
+        'default'
+    );
 });
+
+function display_order_logs_metabox($post) {
+    $logs = get_post_meta($post->ID, '_inventory_logs', true);
+    if (!empty($logs)) {
+        $logs = array_reverse($logs);
+        echo '<ul>';
+        foreach ($logs as $log) {
+            echo '<li>' . esc_html($log) . '</li>';
+        }
+        echo '</ul>';
+    }
+}
 
 function render_order_status_box($post) {
     $current_status = get_post_meta($post->ID, 'order_status', true);
     $current_user = wp_get_current_user();
-    
+        
     // Định nghĩa các trạng thái
     $all_statuses = [
         'pending' => 'Chờ duyệt',
         'completed' => 'Hoàn thành'
     ];
-    
+        
     // Kiểm tra quyền của user hiện tại
     $is_admin = current_user_can('administrator');
     $is_editor = current_user_can('editor');
-    
+    $is_quan_ly_kho = in_array('quan_ly_kho', $current_user->roles);
+        
     // Xác định các trạng thái được phép chọn
-    if ($is_admin) {
-        // Admin có full quyền
+    if ($is_admin || $is_quan_ly_kho) {
+        // Admin và Quản lý kho có full quyền
         $allowed_statuses = $all_statuses;
     } elseif ($is_editor) {
         // Biên tập viên chỉ được chọn "Chờ duyệt"
@@ -752,25 +763,25 @@ function render_order_status_box($post) {
         // Các role khác không được thay đổi trạng thái
         $allowed_statuses = [];
     }
-    
+        
     // Nếu user không có quyền thay đổi trạng thái
     if (empty($allowed_statuses)) {
         echo '<span>Bạn không có quyền thay đổi trạng thái</span>';
         return;
     }
-    
+        
     echo '<select name="order_status">';
-    
+        
     foreach ($allowed_statuses as $value => $label) {
         $selected = selected($current_status, $value, false);
         echo '<option value="' . esc_attr($value) . '" ' . $selected . '>' . esc_html($label) . '</option>';
     }
-    
+        
     if (!array_key_exists($current_status, $allowed_statuses) && !empty($current_status)) {
         $current_label = isset($all_statuses[$current_status]) ? $all_statuses[$current_status] : $current_status;
         echo '<option value="' . esc_attr($current_status) . '" selected disabled>' . esc_html($current_label) . ' (Chỉ đọc)</option>';
     }
-    
+        
     echo '</select>';
 }
 
@@ -871,12 +882,6 @@ function render_order_check_products_box($post) {
     ?>
 
     <div id="order_summary" class="order-summary-box" style="background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; margin-bottom: 20px;">
-        <div class="summary-header" style="display: flex; align-items: center; margin-bottom: 10px;">
-            <h4 style="margin: 0; color: #495057; display: flex; align-items: center;">
-                📊 <span style="margin-left: 8px;">Tổng kết đơn hàng</span>
-            </h4>
-        </div>
-        
         <div class="summary-content" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
             <div class="summary-item" style="background: white; padding: 12px; border-left: 4px solid #007cba;">
                 <div class="summary-label" style="font-size: 12px; color: #6c757d; margin-bottom: 5px;">Tổng số thùng</div>
@@ -892,20 +897,6 @@ function render_order_check_products_box($post) {
                 <div class="summary-label" style="font-size: 12px; color: #6c757d; margin-bottom: 5px;">Trạng thái</div>
                 <div class="summary-value" style="font-size: 16px; font-weight: bold; color: #ffc107;" id="check_status">Chưa kiểm tra</div>
                 <div class="summary-detail" style="font-size: 11px; color: #6c757d;" id="status_detail">Cần kiểm tra tồn kho</div>
-            </div>
-            <div class="summary-item" style="background: white; padding: 12px; border-left: 4px solid #6f42c1;">
-                <div class="summary-label" style="font-size: 12px; color: #6c757d; margin-bottom: 5px;">Độ chính xác</div>
-                <div class="summary-value" style="font-size: 16px; font-weight: bold; color: #6f42c1;" id="accuracy_rate">-</div>
-                <div class="summary-detail" style="font-size: 11px; color: #6c757d;" id="accuracy_detail">Thùng hợp lệ / Tổng thùng</div>
-            </div>
-        </div>
-        <div class="summary-progress" style="margin-top: 15px;">
-            <div class="progress-label" style="display: flex; justify-content: space-between; font-size: 12px; color: #6c757d; margin-bottom: 5px;">
-                <span>Tiến độ hoàn thành</span>
-                <span id="progress_percentage">0%</span>
-            </div>
-            <div class="progress-bar-container" style="background: #e9ecef; height: 8px; border-radius: 4px; overflow: hidden;">
-                <div class="progress-bar-fill" id="progress_fill" style="background: linear-gradient(90deg, #007cba, #28a745); height: 100%; width: 0%; transition: width 0.3s ease, background 0.3s ease;"></div>
             </div>
         </div>
     </div>
@@ -938,8 +929,10 @@ function render_order_check_products_box($post) {
         </table>
         
         <button type="button" class="button" id="add_product_row">+ Thêm sản phẩm</button>
-        <button type="button" class="button button-primary" id="check_quantities" style="margin-left: 10px;">🔍 Check số lượng</button>
+        <!-- <button type="button" class="button button-primary" id="check_quantities" style="margin-left: 10px;">🔍 Check số lượng</button> -->
+        <button type="button" id="stock-check-button" class="button button-secondary" style="margin-left: 10px; background: #ff9800; border-color: #ff9800; color: white;">📊 Kiểm tra tất cả</button>
     </div>
+    <span style="margin-top: 12px; display: inline-block;">Vui lòng bấm nút "Kiểm tra tất cả" trước khi lưu dữ liệu.</span>
 
     <script>
         let rowIndex = <?php echo (is_array($products) ? count($products) : 0); ?>;
@@ -997,66 +990,8 @@ function render_order_check_products_box($post) {
             
             document.getElementById('total_products').textContent = totalCheckedProducts.toLocaleString();
             document.getElementById('products_detail').textContent = `${totalCheckedProducts} mã barcode`;
-            
-            // Tính độ chính xác
-            let accuracy = 0;
-            if (totalBoxes > 0) {
-                accuracy = Math.round((totalValidBoxes / totalBoxes) * 100);
-            }
-            
-            const accuracyElement = document.getElementById('accuracy_rate');
-            const accuracyDetailElement = document.getElementById('accuracy_detail');
-            
-            if (totalBoxes > 0) {
-                accuracyElement.textContent = `${accuracy}%`;
-                accuracyDetailElement.textContent = `${totalValidBoxes}/${totalBoxes} thùng hợp lệ`;
-                
-                // Thay đổi màu theo độ chính xác
-                if (accuracy >= 95) {
-                    accuracyElement.style.color = '#28a745';
-                } else if (accuracy >= 80) {
-                    accuracyElement.style.color = '#ffc107';
-                } else {
-                    accuracyElement.style.color = '#dc3545';
-                }
-            } else {
-                accuracyElement.textContent = '-';
-                accuracyDetailElement.textContent = 'Chưa có dữ liệu';
-                accuracyElement.style.color = '#6c757d';
-            }
-            
-            // Cập nhật progress bar
-            updateProgressBar(totalBoxes, totalCheckedProducts, accuracy);
         }
-        
-        // Hàm cập nhật progress bar
-        function updateProgressBar(totalBoxes, totalProducts, accuracy) {
-            const progressFill = document.getElementById('progress_fill');
-            const progressPercentage = document.getElementById('progress_percentage');
-            
-            let progress = 0;
-            
-            if (totalBoxes > 0 && totalProducts > 0) {
-                // Tính progress dựa trên việc có dữ liệu và độ chính xác
-                const hasData = Math.min(100, (totalProducts / Math.max(totalBoxes * 10, 1)) * 100); // Giả sử mỗi thùng có ~10 sản phẩm
-                progress = Math.min(100, (hasData * 0.7) + (accuracy * 0.3));
-            }
-            
-            progressFill.style.width = `${progress}%`;
-            progressPercentage.textContent = `${Math.round(progress)}%`;
-            
-            // Thay đổi màu progress bar
-            if (progress >= 90) {
-                progressFill.style.background = 'linear-gradient(90deg, #28a745, #20c997)';
-            } else if (progress >= 70) {
-                progressFill.style.background = 'linear-gradient(90deg, #ffc107, #fd7e14)';
-            } else if (progress >= 50) {
-                progressFill.style.background = 'linear-gradient(90deg, #fd7e14, #dc3545)';
-            } else {
-                progressFill.style.background = 'linear-gradient(90deg, #dc3545, #6f42c1)';
-            }
-        }
-        
+    
         // Hàm cập nhật trạng thái kiểm tra
         function updateCheckStatus(status, detail, color) {
             const statusElement = document.getElementById('check_status');
@@ -1085,12 +1020,6 @@ function render_order_check_products_box($post) {
                 setTimeout(updateOrderSummary, 100);
             }
         });
-
-        document.getElementById("check_quantities").addEventListener("click", function() {
-            updateCheckStatus('Đang kiểm tra...', 'Vui lòng đợi', '#007cba');
-            checkAllQuantities();
-        });
-        
 
         document.querySelectorAll(".box-codes-input").forEach(function(input, index) {
             initRowEventListeners(index);
@@ -1834,19 +1763,19 @@ function add_stock_check_script() {
         let isCheckingStock = false;
         
         // Thêm nút kiểm tra tồn kho
-        function addStockCheckButton() {
-            if ($('#stock-check-button').length === 0) {
-                const checkButton = $('<button type="button" id="stock-check-button" class="button button-secondary" style="margin-left: 10px; background: #ff9800; border-color: #ff9800; color: white;">📊 Kiểm tra tồn kho</button>');
-                $('#check_quantities').after(checkButton);
+        // function addStockCheckButton() {
+        //     if ($('#stock-check-button').length === 0) {
+        //         // const checkButton = $('<button type="button" id="stock-check-button" class="button button-secondary" style="margin-left: 10px; background: #ff9800; border-color: #ff9800; color: white;">📊 Kiểm tra tồn kho</button>');
+        //         // $('#check_quantities').after(checkButton);
                 
-                checkButton.on('click', function() {
-                    checkStockBeforeUpdate();
-                });
-            }
-        }
+        //         checkButton.on('click', function() {
+        //             checkStockBeforeUpdate();
+        //         });
+        //     }
+        // }
         
-        // Gọi hàm thêm nút
-        addStockCheckButton();
+        // // Gọi hàm thêm nút
+        // addStockCheckButton();
         
         // Override form submit để kiểm tra tồn kho trước
         $('form#post').on('submit', function(e) {
@@ -2142,21 +2071,12 @@ function add_mandatory_stock_check_validation() {
         let stockCheckPassed = false;
         let isCheckingStock = false;
         let formDataSnapshot = null; // Lưu snapshot dữ liệu form khi check thành công
-        
-        // Thêm nút kiểm tra tồn kho
-        function addStockCheckButton() {
-            if ($('#stock-check-button').length === 0) {
-                const checkButton = $('<button type="button" id="stock-check-button" class="button button-secondary" style="margin-left: 10px; background: #ff9800; border-color: #ff9800; color: white;">📊 Kiểm tra tồn kho</button>');
-                $('#check_quantities').after(checkButton);
-                
-                checkButton.on('click', function() {
-                    checkStockBeforeUpdate();
-                });
-            }
-        }
-        
-        // Gọi hàm thêm nút
-        addStockCheckButton();
+
+        let checkButton = $('#stock-check-button');                
+        checkButton.on('click', function() {
+            checkStockBeforeUpdate();
+            checkAllQuantities();
+        });
         
         // Hàm tạo snapshot dữ liệu form
         function createFormSnapshot() {
@@ -2704,12 +2624,28 @@ function render_order_check_single_products_box($post) {
                 <div>
                     <h4 style="margin: 0 0 8px 0; color: #1565c0;">🏷️ Nhập sản phẩm đơn lẻ</h4>
                     <p style="margin: 0; font-size: 13px; color: #666;">
-                        Nhập từng sản phẩm riêng lẻ với mã định danh cụ thể. Hệ thống sẽ tự động kiểm tra trùng lặp.
+                        Nhập từng sản phẩm riêng lẻ với mã định danh cụ thể. Hệ thống sẽ tự động kiểm tra trùng lặp và xem đã có trong thùng chưa.
                     </p>
                 </div>
                 <div class="single-summary" style="text-align: right; color: #1565c0;">
                     <div style="font-size: 24px; font-weight: bold;" id="single_total_count">0</div>
                     <div style="font-size: 12px;">sản phẩm lẻ</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Thông báo cảnh báo sản phẩm đã có trong thùng -->
+        <div id="bulk_conflict_warning" style="display: none; margin-bottom: 15px;">
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 12px;">
+                <h4 style="margin: 0 0 10px 0; color: #856404;">⚠️ Cảnh báo sản phẩm trùng lặp với thùng</h4>
+                <div id="bulk_conflict_details"></div>
+                <div style="margin-top: 10px;">
+                    <button type="button" class="button button-secondary" id="force_allow_bulk_conflict">
+                        ✓ Vẫn cho phép thêm
+                    </button>
+                    <span style="margin-left: 10px; font-size: 12px; color: #666;">
+                        Sản phẩm sẽ được đánh dấu để phân biệt với sản phẩm trong thùng
+                    </span>
                 </div>
             </div>
         </div>
@@ -2722,7 +2658,7 @@ function render_order_check_single_products_box($post) {
                     <th>Lô</th>
                     <th>Date</th>
                     <th>Mã sản phẩm</th>
-                    <th style="width: 200px;">Thông báo</th>
+                    <th style="width: 200px;">Trạng thái</th>
                     <th style="width: 50px;"></th>
                 </tr>
             </thead>
@@ -2730,13 +2666,14 @@ function render_order_check_single_products_box($post) {
                 <?php
                 if (!empty($single_products)) {
                     foreach ($single_products as $index => $item) {
-                        echo render_single_product_row_improved(
+                        echo render_single_product_row_enhanced(
                             isset($item['product_id']) ? $item['product_id'] : '',
                             isset($item['quantity']) ? $item['quantity'] : '',
                             isset($item['product_codes']) ? $item['product_codes'] : '',
                             $index,
                             isset($item['lot_name']) ? $item['lot_name'] : '',
-                            isset($item['lot_date']) ? $item['lot_date'] : ''
+                            isset($item['lot_date']) ? $item['lot_date'] : '',
+                            isset($item['allow_bulk_conflict']) ? $item['allow_bulk_conflict'] : false
                         );
                     }
                 }
@@ -2747,7 +2684,6 @@ function render_order_check_single_products_box($post) {
         <div style="display: flex; gap: 10px; align-items: center;">
             <button type="button" class="button" id="add_single_product_row">+ Thêm sản phẩm lẻ</button>
             <button type="button" class="button button-secondary" id="validate_single_products">✅ Kiểm tra tất cả</button>
-            <!-- <div id="single_validation_summary" style="margin-left: 15px; font-size: 13px; color: #666;"></div> -->
         </div>
 
         <!-- Bảng tổng kết trùng lặp -->
@@ -2761,18 +2697,19 @@ function render_order_check_single_products_box($post) {
 
     <script>
         let singleRowIndex = <?php echo (is_array($single_products) ? count($single_products) : 0); ?>;
+        let allowBulkConflicts = {}; // Track products allowed despite bulk conflicts
         
         // Add single product row
         document.getElementById("add_single_product_row").addEventListener("click", function() {
             let tableBody = document.querySelector("#single_products_table tbody");
             let row = document.createElement("tr");
             
-            row.innerHTML = renderSingleProductRow('', '', '', singleRowIndex);
+            row.innerHTML = renderSingleProductRowEnhanced('', '', '', '', singleRowIndex, '', false);
             tableBody.appendChild(row);
             singleRowIndex++;
             
             // Khởi tạo event listeners cho row mới
-            initSingleProductEventListeners(singleRowIndex - 1);
+            initSingleProductEventListenersEnhanced(singleRowIndex - 1);
             
             // Cập nhật tổng kết
             setTimeout(updateSingleProductsSummary, 100);
@@ -2781,22 +2718,62 @@ function render_order_check_single_products_box($post) {
         // Remove single product row
         document.addEventListener("click", function(e) {
             if (e.target.classList.contains("remove-single-row")) {
-                e.target.closest("tr").remove();
+                const row = e.target.closest("tr");
+                const index = row.getAttribute('data-single-index');
+                
+                // Remove from allowBulkConflicts tracking
+                if (index && allowBulkConflicts[index]) {
+                    delete allowBulkConflicts[index];
+                }
+                
+                row.remove();
                 setTimeout(() => {
                     updateSingleProductsSummary();
-                    validateAllSingleProducts();
+                    validateAllSingleProductsEnhanced();
                 }, 100);
             }
         });
 
-        // Validate all single products
-        document.getElementById("validate_single_products").addEventListener("click", function() {
-            validateAllSingleProducts();
+        // Force allow bulk conflict
+        document.getElementById("force_allow_bulk_conflict").addEventListener("click", function() {
+            const conflictWarning = document.getElementById('bulk_conflict_warning');
+            const conflictProductIds = conflictWarning.getAttribute('data-conflict-products');
+            
+            if (conflictProductIds) {
+                const productIds = conflictProductIds.split(',');
+                productIds.forEach(productId => {
+                    // Find rows with this product and mark as allowed
+                    document.querySelectorAll('#single_products_table tbody tr').forEach(row => {
+                        const productSelect = row.querySelector('select[name*="[product_id]"]');
+                        const index = row.getAttribute('data-single-index');
+                        
+                        if (productSelect && productSelect.value == productId) {
+                            allowBulkConflicts[index] = true;
+                            
+                            // Add hidden input to track this
+                            const hiddenInput = document.createElement('input');
+                            hiddenInput.type = 'hidden';
+                            hiddenInput.name = `order_check_single_products[${index}][allow_bulk_conflict]`;
+                            hiddenInput.value = '1';
+                            row.appendChild(hiddenInput);
+                            
+                            // Re-validate this product
+                            validateSingleProductEnhanced(parseInt(index));
+                        }
+                    });
+                });
+                
+                conflictWarning.style.display = 'none';
+            }
         });
 
-        // Render single product row function
-        function renderSingleProductRow(productId, quantity, codes, index) {
-            console.log(index);
+        // Validate single products
+        document.getElementById("validate_single_products").addEventListener("click", function() {
+            validateAllSingleProductsEnhanced();
+        });
+
+        // Enhanced render single product row function
+        function renderSingleProductRowEnhanced(productId, quantity, lotDate, codes, index, lotName = '', allowBulkConflict = false) {
             const productOptions = <?php 
                 $products_js = [];
                 foreach ($all_products as $product) {
@@ -2818,6 +2795,9 @@ function render_order_check_single_products_box($post) {
                 optionsHtml += `<option value="${product.id}" data-custom-id="${product.custom_id}" ${selected}>${product.label}</option>`;
             });
             
+            const bulkConflictInput = allowBulkConflict ? 
+                `<input type="hidden" name="order_check_single_products[${index}][allow_bulk_conflict]" value="1" />` : '';
+            
             return `
                 <tr data-single-index="${index}">
                     <td>
@@ -2828,6 +2808,7 @@ function render_order_check_single_products_box($post) {
                                 required>
                             ${optionsHtml}
                         </select>
+                        ${bulkConflictInput}
                     </td>
                     <td>
                         <input type="number" 
@@ -2881,8 +2862,8 @@ function render_order_check_single_products_box($post) {
             `;
         }
 
-        // Initialize event listeners for single product
-        function initSingleProductEventListeners(index) {
+        // Enhanced initialize event listeners for single product
+        function initSingleProductEventListenersEnhanced(index) {
             const productSelect = document.querySelector(`[name="order_check_single_products[${index}][product_id]"]`);
             const quantityInput = document.querySelector(`[name="order_check_single_products[${index}][quantity]"]`);
             const codesInput = document.querySelector(`[name="order_check_single_products[${index}][product_codes]"]`);
@@ -2891,33 +2872,443 @@ function render_order_check_single_products_box($post) {
             
             if (productSelect) {
                 productSelect.addEventListener('change', () => {
+                    checkProductInBulkConflict(index);
                     loadLotsForSingleProduct(index);
-                    validateSingleProduct(index);
+                    validateSingleProductEnhanced(index);
                     updateSingleProductsSummary();
                 });
             }
             if (quantityInput) {
                 quantityInput.addEventListener('input', () => {
-                    validateSingleProduct(index);
+                    validateSingleProductEnhanced(index);
                     updateSingleProductsSummary();
                 });
             }
             if (codesInput) {
                 codesInput.addEventListener('input', () => {
-                    validateSingleProduct(index);
+                    validateSingleProductEnhanced(index);
                     updateSingleProductsSummary();
                 });
             }
             if (lotSelect) {
                 lotSelect.addEventListener('change', () => {
-                    validateSingleProduct(index);
+                    validateSingleProductEnhanced(index);
                 });
             }
             if (dateInput) {
                 dateInput.addEventListener('change', () => {
-                    validateSingleProduct(index);
+                    validateSingleProductEnhanced(index);
                 });
             }
+        }
+
+        // Check if product already exists in bulk products
+        function checkProductInBulkConflict(index) {
+            const productSelect = document.querySelector(`[name="order_check_single_products[${index}][product_id]"]`);
+            const messageDiv = document.getElementById(`single_message_${index}`);
+            
+            if (!productSelect || !productSelect.value) {
+                return;
+            }
+            
+            const productId = productSelect.value;
+            const orderId = <?php echo $post->ID; ?>;
+            
+            // Show checking message
+            if (messageDiv) {
+                messageDiv.innerHTML = '<small style="color: #007cba;">🔍 Kiểm tra sản phẩm trong thùng...</small>';
+            }
+            
+            // AJAX call to check bulk products
+            fetch(ajaxurl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    action: 'check_product_in_bulk',
+                    product_id: productId,
+                    order_id: orderId,
+                    nonce: '<?php echo wp_create_nonce("check_product_bulk_nonce"); ?>'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.data.found_in_bulk) {
+                    // Product found in bulk - show error unless explicitly allowed
+                    if (!allowBulkConflicts[index]) {
+                        handleBulkConflict(index, productId, data.data.bulk_info);
+                    } else {
+                        // Product allowed despite conflict
+                        if (messageDiv) {
+                            messageDiv.innerHTML = '<small style="color: #28a745;">✅ Sản phẩm được phép (đã có trong thùng)</small>';
+                        }
+                    }
+                } else {
+                    // Product not in bulk - OK to proceed
+                    if (messageDiv) {
+                        messageDiv.innerHTML = '<small style="color: #28a745;">✅ Sản phẩm chưa có trong thùng</small>';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error checking bulk conflict:', error);
+                if (messageDiv) {
+                    messageDiv.innerHTML = '<small style="color: #dc3545;">❌ Lỗi kiểm tra thùng</small>';
+                }
+            });
+        }
+
+        // Handle bulk conflict
+        function handleBulkConflict(index, productId, bulkInfo) {
+            const messageDiv = document.getElementById(`single_message_${index}`);
+            const productSelect = document.querySelector(`[name="order_check_single_products[${index}][product_id]"]`);
+            const conflictWarning = document.getElementById('bulk_conflict_warning');
+            const conflictDetails = document.getElementById('bulk_conflict_details');
+            
+            // Show error in message
+            if (messageDiv) {
+                messageDiv.innerHTML = `
+                    <small style="color: #dc3545;">
+                        ❌ Sản phẩm đã có trong thùng<br>
+                        📦 Thùng: ${bulkInfo.quantity} cái (Lô: ${bulkInfo.lot_name || 'N/A'})
+                    </small>
+                `;
+            }
+            
+            // Style the select as error
+            if (productSelect) {
+                productSelect.style.borderColor = '#dc3545';
+                productSelect.style.backgroundColor = '#fff5f5';
+            }
+            
+            // Show warning banner
+            conflictDetails.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div style="flex: 1;">
+                        <strong>${bulkInfo.product_name}</strong> đã có trong danh sách thùng:<br>
+                        <small style="color: #666;">
+                            📦 Số lượng thùng: ${bulkInfo.quantity} | 
+                            🏷️ Lô: ${bulkInfo.lot_name || 'N/A'} | 
+                            📅 Ngày: ${bulkInfo.lot_date || 'N/A'}
+                        </small>
+                    </div>
+                    <div style="color: #dc3545; font-size: 20px;">⚠️</div>
+                </div>
+            `;
+            conflictWarning.setAttribute('data-conflict-products', productId);
+            conflictWarning.style.display = 'block';
+        }
+
+        // Enhanced validate single product (includes bulk check)
+        function validateSingleProductEnhanced(index) {
+            const productSelect = document.querySelector(`[name="order_check_single_products[${index}][product_id]"]`);
+            const quantityInput = document.querySelector(`[name="order_check_single_products[${index}][quantity]"]`);
+            const codesInput = document.querySelector(`[name="order_check_single_products[${index}][product_codes]"]`);
+            const lotSelect = document.querySelector(`[name="order_check_single_products[${index}][lot_name]"]`);
+            const dateInput = document.querySelector(`[name="order_check_single_products[${index}][lot_date]"]`);
+            const messageDiv = document.getElementById(`single_message_${index}`);
+            
+            if (!productSelect || !quantityInput || !codesInput || !messageDiv) return;
+            
+            const productId = productSelect.value;
+            const quantity = parseInt(quantityInput.value) || 0;
+            const codes = codesInput.value.trim();
+            const lotName = lotSelect?.value || '';
+            const lotDate = dateInput?.value || '';
+            
+            let errors = [];
+            let warnings = [];
+            
+            // Basic validation
+            if (!productId) {
+                errors.push('Chưa chọn sản phẩm');
+                productSelect.style.borderColor = '#dc3545';
+                productSelect.style.backgroundColor = '';
+            } else {
+                productSelect.style.borderColor = '';
+                productSelect.style.backgroundColor = '';
+            }
+            
+            if (quantity <= 0) {
+                errors.push('Số lượng phải > 0');
+                quantityInput.style.borderColor = '#dc3545';
+            } else {
+                quantityInput.style.borderColor = '';
+            }
+            
+            if (!codes) {
+                errors.push('Thiếu mã sản phẩm');
+                codesInput.style.borderColor = '#dc3545';
+            } else {
+                codesInput.style.borderColor = '';
+            }
+
+            if (!lotName) {
+                errors.push('Chưa chọn lô');
+                if (lotSelect) lotSelect.style.borderColor = '#dc3545';
+            } else {
+                if (lotSelect) lotSelect.style.borderColor = '';
+            }
+
+            if (!lotDate) {
+                errors.push('Chưa chọn ngày');
+                if (dateInput) dateInput.style.borderColor = '#dc3545';
+            } else {
+                if (dateInput) dateInput.style.borderColor = '';
+            }
+            
+            // Advanced validation if basic info is complete
+            if (productId && quantity > 0 && codes) {
+                const codesList = codes.split(/[\n,;]+/)
+                    .map(code => code.trim())
+                    .filter(code => code);
+                const actualCount = codesList.length;
+                
+                // 1. Quantity check
+                if (actualCount !== quantity) {
+                    warnings.push(`Số lượng không khớp: ${quantity} dự kiến, ${actualCount} thực tế`);
+                }
+                
+                // 2. Internal duplicates
+                const internalDuplicates = findInternalDuplicates(codesList);
+                if (internalDuplicates.length > 0) {
+                    const duplicateDetails = analyzeInternalDuplicates(codesList);
+                    let duplicateMessage = 'Có mã trùng lặp trong danh sách: ';
+                    
+                    if (internalDuplicates.length <= 3) {
+                        const detailStrings = duplicateDetails.map(item => `${item.code} (${item.count} lần)`);
+                        duplicateMessage += detailStrings.join(', ');
+                    } else {
+                        const firstThree = duplicateDetails.slice(0, 3)
+                            .map(item => `${item.code} (${item.count} lần)`);
+                        duplicateMessage += firstThree.join(', ') + ` và ${internalDuplicates.length - 3} mã khác`;
+                    }
+                    
+                    errors.push(duplicateMessage);
+                }
+                
+                const uniqueCodes = [...new Set(codesList)];
+                
+                // 3. Check duplicates with other single products
+                const duplicatesWithOtherSingle = checkDuplicateWithOtherSingleProductsImproved(index, uniqueCodes);
+                if (duplicatesWithOtherSingle.length > 0) {
+                    errors.push(`Trùng với sản phẩm lẻ khác: ${duplicatesWithOtherSingle.slice(0, 3).join(', ')}${duplicatesWithOtherSingle.length > 3 ? '...' : ''}`);
+                }
+                
+                // 4. Check duplicates with bulk products
+                const duplicatesWithBulk = checkDuplicateWithBulkProductsImproved(uniqueCodes);
+                if (duplicatesWithBulk.length > 0) {
+                    errors.push(`Trùng với sản phẩm theo thùng: ${duplicatesWithBulk.slice(0, 3).join(', ')}${duplicatesWithBulk.length > 3 ? '...' : ''}`);
+                }
+                
+                // 5. Database validation
+                const selectedOption = productSelect.options[productSelect.selectedIndex];
+                const customProdId = selectedOption.getAttribute('data-custom-id');
+                const productName = selectedOption.text;
+                
+                if (customProdId) {
+                    validateCodesWithDatabase(uniqueCodes, customProdId, productName, index);
+                }
+            }
+            
+            // Display validation result (excluding bulk conflict and database validation)
+            if (!allowBulkConflicts[index] && productId) {
+                // Skip showing other errors if we need to check bulk conflict first
+                displayValidationResultEnhanced(messageDiv, codesInput, errors, warnings, productId, quantity, codes, true);
+            } else {
+                displayValidationResultEnhanced(messageDiv, codesInput, errors, warnings, productId, quantity, codes, false);
+            }
+        }
+
+        function displayValidationResultEnhanced(messageDiv, codesInput, errors, warnings, productId, quantity, codes, skipBulkMessage) {
+            // Don't overwrite bulk conflict messages unless explicitly allowed
+            const currentMessage = messageDiv.innerHTML;
+            if (skipBulkMessage && (currentMessage.includes('Kiểm tra sản phẩm trong thùng') || currentMessage.includes('đã có trong thùng'))) {
+                return;
+            }
+            
+            let message = '';
+            let color = '#666';
+            
+            if (errors.length > 0) {
+                message = '❌ ' + errors.join('<br>• ');
+                color = '#dc3545';
+                codesInput.style.borderColor = '#dc3545';
+            } else if (warnings.length > 0) {
+                message = '⚠️ ' + warnings.join('<br>• ');
+                color = '#ffc107';
+                codesInput.style.borderColor = '#ffc107';
+            } else if (productId && quantity > 0 && codes) {
+                message = '🔄 Đang kiểm tra với database...';
+                color = '#007cba';
+                codesInput.style.borderColor = '#007cba';
+            } else {
+                message = '💡 Chọn sản phẩm và nhập thông tin';
+                color = '#666';
+            }
+            
+            messageDiv.innerHTML = `<small style="color: ${color};">${message}</small>`;
+        }
+
+        // Enhanced validate all single products
+        function validateAllSingleProductsEnhanced() {
+            const rows = document.querySelectorAll('#single_products_table tbody tr');
+            let hasConflicts = false;
+            
+            rows.forEach((row) => {
+                const index = row.getAttribute('data-single-index');
+                if (index !== null) {
+                    validateSingleProductEnhanced(parseInt(index));
+                    
+                    const messageDiv = document.getElementById(`single_message_${index}`);
+                    if (messageDiv && messageDiv.textContent.includes('đã có trong thùng')) {
+                        hasConflicts = true;
+                    }
+                }
+            });
+            
+            if (hasConflicts) {
+                showTemporaryMessage('⚠️ Có sản phẩm đã tồn tại trong thùng. Vui lòng xem xét!', 'warning');
+            } else {
+                showTemporaryMessage('✅ Tất cả sản phẩm lẻ đã được kiểm tra!', 'success');
+            }
+        }
+
+        // Copy existing functions from original code
+        function findInternalDuplicates(codesList) {
+            const duplicates = [];
+            const seen = new Set();
+            const duplicateSet = new Set();
+            
+            codesList.forEach(code => {
+                if (seen.has(code)) {
+                    duplicateSet.add(code);
+                } else {
+                    seen.add(code);
+                }
+            });
+            
+            return Array.from(duplicateSet);
+        }
+
+        function analyzeInternalDuplicates(codesList) {
+            const codeCount = {};
+            const duplicates = [];
+            
+            codesList.forEach(code => {
+                codeCount[code] = (codeCount[code] || 0) + 1;
+            });
+            
+            Object.entries(codeCount).forEach(([code, count]) => {
+                if (count > 1) {
+                    duplicates.push({
+                        code: code,
+                        count: count
+                    });
+                }
+            });
+            
+            return duplicates;
+        }
+
+        function checkDuplicateWithOtherSingleProductsImproved(currentIndex, currentCodes) {
+            const duplicates = [];
+            const allSingleRows = document.querySelectorAll('#single_products_table tbody tr');
+            
+            allSingleRows.forEach((row, rowPosition) => {
+                let rowIndex = row.getAttribute('data-single-index');
+                if (!rowIndex || rowIndex === '__index__' || rowIndex === null) {
+                    rowIndex = rowPosition;
+                } else {
+                    rowIndex = parseInt(rowIndex);
+                }
+                
+                if (rowIndex === parseInt(currentIndex)) {
+                    return;
+                }
+                
+                const otherCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
+                if (!otherCodesInput) return;
+                
+                const otherCodes = otherCodesInput.value.trim();
+                if (!otherCodes) return;
+                
+                const otherCodesList = otherCodes.split(/[\n,;]+/)
+                    .map(code => code.trim())
+                    .filter(code => code);
+                
+                currentCodes.forEach(code => {
+                    if (otherCodesList.includes(code)) {
+                        duplicates.push(code);
+                    }
+                });
+            });
+            
+            return [...new Set(duplicates)];
+        }
+
+        function validateBarcodesInBoxes(codes, customProdId, productName, index) {
+            const messageDiv = document.getElementById(`single_message_${index}`);
+            const codesInput = document.querySelector(`[name="order_check_single_products[${index}][product_codes]"]`);
+            
+            if (messageDiv) {
+                const currentMessage = messageDiv.innerHTML;
+                if (!currentMessage.includes('Đang kiểm tra barcode trong box')) {
+                    messageDiv.innerHTML = currentMessage + '<br><small style="color: #007cba;">🔍 Đang kiểm tra barcode có thuộc box nào...</small>';
+                }
+            }
+            
+            jQuery.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'validate_barcode_in_boxes',
+                    codes: codes,
+                    product_id: customProdId,
+                    product_name: productName,
+                    nonce: '<?php echo wp_create_nonce("validate_barcode_boxes_nonce"); ?>'
+                },
+                success: function(response) {
+                    console.log('Barcode in boxes validation response:', response);
+                    updateBarcodeInBoxesValidationResult(response, index, codesInput, messageDiv);
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX Error:', status, error);
+                    if (messageDiv) {
+                        let currentMessage = messageDiv.innerHTML;
+                        currentMessage = currentMessage.replace(/🔍 Đang kiểm tra barcode trong box\.\.\./g, '');
+                        messageDiv.innerHTML = currentMessage + '<br><small style="color: #dc3545;">❌ Lỗi kết nối database</small>';
+                    }
+                }
+            });
+        }
+
+        function checkDuplicateWithBulkProductsImproved(codes) {
+            const duplicates = [];
+            document.querySelectorAll('[id^="product_codes_"]').forEach(div => {
+                if (div.id.includes('single_')) return;
+                
+                const text = div.textContent || div.innerText;
+                const lines = text.split('\n');
+                
+                lines.forEach(line => {
+                    const cleanLine = line.trim();
+                    if (cleanLine && 
+                        !/[➤✅⚠️❌Tổng Thùng hợp lệ:]/i.test(cleanLine) && 
+                        /^[A-Z0-9]+$/i.test(cleanLine) &&
+                        cleanLine.length >= 6) {
+                        
+                        codes.forEach(code => {
+                            if (cleanLine === code) {
+                                duplicates.push(code);
+                            }
+                        });
+                    }
+                });
+            });
+            
+            return [...new Set(duplicates)];
         }
 
         function loadLotsForSingleProduct(index) {
@@ -2930,7 +3321,6 @@ function render_order_check_single_products_box($post) {
             const selectedOption = productSelect.options[productSelect.selectedIndex];
             const customId = selectedOption.getAttribute('data-custom-id');
             
-            // Reset date input
             if (dateInput) {
                 dateInput.value = '';
             }
@@ -2943,7 +3333,6 @@ function render_order_check_single_products_box($post) {
             lotSelect.innerHTML = '<option value="">🔄 Đang tải...</option>';
             lotSelect.disabled = true;
             
-            // AJAX call để lấy lots
             fetch(ajaxurl, {
                 method: 'POST',
                 headers: {
@@ -2982,227 +3371,6 @@ function render_order_check_single_products_box($post) {
             });
         }
 
-        // Update single products summary
-        function updateSingleProductsSummary() {
-            let totalProducts = 0;
-            let totalCodes = 0;
-            
-            const rows = document.querySelectorAll('#single_products_table tbody tr');
-            rows.forEach((row) => {
-                const productSelect = row.querySelector('select[name*="[product_id]"]');
-                const codesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                
-                if (productSelect && productSelect.value) {
-                    totalProducts++;
-                    
-                    if (codesInput && codesInput.value.trim()) {
-                        const codes = codesInput.value.trim().split(/[\n,;]+/).filter(code => code.trim());
-                        totalCodes += codes.length;
-                    }
-                }
-            });
-            
-            document.getElementById('single_total_count').textContent = totalCodes.toLocaleString();
-            
-            // Cập nhật summary trong order summary chính nếu có
-            if (typeof updateOrderSummary === 'function') {
-                updateOrderSummary();
-            }
-        }
-
-        function findInternalDuplicates(codesList) {
-            const duplicates = [];
-            const seen = new Set();
-            const duplicateSet = new Set();
-            
-            // Duyệt qua tất cả mã để tìm trùng lặp
-            codesList.forEach(code => {
-                if (seen.has(code)) {
-                    // Nếu đã thấy mã này trước đó, đó là duplicate
-                    duplicateSet.add(code);
-                } else {
-                    seen.add(code);
-                }
-            });
-            
-            return Array.from(duplicateSet);
-        }
-
-        // Hàm phân tích chi tiết trùng lặp (bao gồm số lần xuất hiện)
-        function analyzeInternalDuplicates(codesList) {
-            const codeCount = {};
-            const duplicates = [];
-            
-            // Đếm số lần xuất hiện của mỗi mã
-            codesList.forEach(code => {
-                codeCount[code] = (codeCount[code] || 0) + 1;
-            });
-            
-            // Tìm những mã xuất hiện > 1 lần
-            Object.entries(codeCount).forEach(([code, count]) => {
-                if (count > 1) {
-                    duplicates.push({
-                        code: code,
-                        count: count
-                    });
-                }
-            });
-            
-            return duplicates;
-        }
-
-        // Validate single product
-        function validateSingleProduct(index) {
-            const productSelect = document.querySelector(`[name="order_check_single_products[${index}][product_id]"]`);
-            const quantityInput = document.querySelector(`[name="order_check_single_products[${index}][quantity]"]`);
-            const codesInput = document.querySelector(`[name="order_check_single_products[${index}][product_codes]"]`);
-            const lotSelect = document.querySelector(`[name="order_check_single_products[${index}][lot_name]"]`);
-            const dateInput = document.querySelector(`[name="order_check_single_products[${index}][lot_date]"]`);
-            const messageDiv = document.getElementById(`single_message_${index}`);
-            
-            if (!productSelect || !quantityInput || !codesInput || !messageDiv) return;
-            
-            const productId = productSelect.value;
-            const productName = productSelect.options[productSelect.selectedIndex].text;
-            const quantity = parseInt(quantityInput.value) || 0;
-            const codes = codesInput.value.trim();
-            const lotName = lotSelect.value;
-            const lotDate = dateInput.value;
-            
-            let errors = [];
-            let warnings = [];
-            
-            // Validation các field bắt buộc
-            if (!productId) {
-                errors.push('Chưa chọn sản phẩm');
-                productSelect.style.borderColor = '#dc3545';
-            } else {
-                productSelect.style.borderColor = '';
-                
-                // Lấy custom_prod_id từ product selected
-                const selectedOption = productSelect.options[productSelect.selectedIndex];
-                const customProdId = selectedOption.getAttribute('data-custom-id');
-                
-                if (!customProdId) {
-                    errors.push('Sản phẩm không có mã định danh');
-                }
-            }
-            
-            if (quantity <= 0) {
-                errors.push('Số lượng phải > 0');
-                quantityInput.style.borderColor = '#dc3545';
-            } else {
-                quantityInput.style.borderColor = '';
-            }
-            
-            if (!codes) {
-                errors.push('Thiếu mã sản phẩm');
-                codesInput.style.borderColor = '#dc3545';
-            } else {
-                codesInput.style.borderColor = '';
-            }
-
-            if (!lotName) {
-                errors.push('Chưa chọn lô');
-                lotSelect.style.borderColor = '#dc3545';
-            } else {
-                lotSelect.style.borderColor = '';
-            }
-
-            if (!lotDate) {
-                errors.push('Chưa chọn date');
-                dateInput.style.borderColor = '#dc3545';
-            } else {
-                dateInput.style.borderColor = '';
-            }
-            
-            // Nếu có đủ thông tin, kiểm tra chi tiết
-            if (productId && quantity > 0 && codes) {
-                const codesList = codes.split(/[\n,;]+/)
-                    .map(code => code.trim())
-                    .filter(code => code);
-                const actualCount = codesList.length;
-                
-                // 1. Kiểm tra số lượng
-                if (actualCount !== quantity) {
-                    warnings.push(`Số lượng không khớp: ${quantity} dự kiến, ${actualCount} thực tế`);
-                }
-                
-                // 2. Kiểm tra trùng lặp nội bộ - PHIÊN BẢN CẢI TIẾN
-                const internalDuplicates = findInternalDuplicates(codesList);
-                if (internalDuplicates.length > 0) {
-                    // Phân tích chi tiết để hiển thị số lần xuất hiện
-                    const duplicateDetails = analyzeInternalDuplicates(codesList);
-                    let duplicateMessage = 'Có mã trùng lặp trong danh sách: ';
-                    
-                    if (internalDuplicates.length <= 3) {
-                        // Hiển thị đầy đủ nếu ít mã
-                        const detailStrings = duplicateDetails.map(item => `${item.code} (${item.count} lần)`);
-                        duplicateMessage += detailStrings.join(', ');
-                    } else {
-                        // Hiển thị 3 mã đầu + số lượng còn lại
-                        const firstThree = duplicateDetails.slice(0, 3)
-                            .map(item => `${item.code} (${item.count} lần)`);
-                        duplicateMessage += firstThree.join(', ') + ` và ${internalDuplicates.length - 3} mã khác`;
-                    }
-                    
-                    errors.push(duplicateMessage);
-                }
-                
-                // Lấy unique codes để dùng cho các validation tiếp theo
-                const uniqueCodes = [...new Set(codesList)];
-                
-                // 3. Kiểm tra trùng lặp với sản phẩm lẻ khác (chỉ những sản phẩm khác index hiện tại)
-                const duplicatesWithOtherSingle = checkDuplicateWithOtherSingleProductsImproved(index, uniqueCodes);
-                if (duplicatesWithOtherSingle.length > 0) {
-                    errors.push(`Trùng với sản phẩm lẻ khác: ${duplicatesWithOtherSingle.slice(0, 3).join(', ')}${duplicatesWithOtherSingle.length > 3 ? '...' : ''}`);
-                }
-                
-                // 4. Kiểm tra trùng lặp với sản phẩm theo thùng
-                const duplicatesWithBulk = checkDuplicateWithBulkProductsImproved(uniqueCodes);
-                if (duplicatesWithBulk.length > 0) {
-                    errors.push(`Trùng với sản phẩm theo thùng: ${duplicatesWithBulk.slice(0, 3).join(', ')}${duplicatesWithBulk.length > 3 ? '...' : ''}`);
-                }
-                
-                // 6. KIỂM TRA MỚI: Validate mã barcode với database
-                const selectedOption = productSelect.options[productSelect.selectedIndex];
-                const customProdId = selectedOption.getAttribute('data-custom-id');
-                
-                if (customProdId) {
-                    // Gọi AJAX để kiểm tra mã có thuộc sản phẩm này không
-                    validateCodesWithDatabase(uniqueCodes, customProdId, productName, index);
-                }
-            }
-            
-            // Hiển thị kết quả validation (không bao gồm database validation vì đó là async)
-            displayValidationResult(messageDiv, codesInput, errors, warnings, productId, quantity, codes);
-        }
-
-        // Hiển thị lỗi
-        function displayValidationResult(messageDiv, codesInput, errors, warnings, productId, quantity, codes){
-            let message = '';
-            let color = '#666';
-            
-            if (errors.length > 0) {
-                message = '❌ ' + errors.join('<br>• ');
-                color = '#dc3545';
-                codesInput.style.borderColor = '#dc3545';
-            } else if (warnings.length > 0) {
-                message = '⚠️ ' + warnings.join('<br>• ');
-                color = '#ffc107';
-                codesInput.style.borderColor = '#ffc107';
-            } else if (productId && quantity > 0 && codes) {
-                message = '🔄 Đang kiểm tra với database...';
-                color = '#007cba';
-                codesInput.style.borderColor = '#007cba';
-            } else {
-                message = '💡 Chọn sản phẩm và nhập thông tin';
-                color = '#666';
-            }
-            
-            messageDiv.innerHTML = `<small style="color: ${color};">${message}</small>`;
-        }
-
         function validateCodesWithDatabase(codes, customProdId, productName, index){
             const messageDiv = document.getElementById(`single_message_${index}`);
             const codesInput = document.querySelector(`[name="order_check_single_products[${index}][product_codes]"]`);
@@ -3225,7 +3393,6 @@ function render_order_check_single_products_box($post) {
                     nonce: window.validateCodesNonce || ''
                 },
                 success: function(response) {
-                    console.log(response)
                     updateValidationWithDatabaseResult(response, index, codesInput, messageDiv);
                 },
                 error: function(xhr, status, error) {
@@ -3239,40 +3406,53 @@ function render_order_check_single_products_box($post) {
             });
         }
 
-        function updateValidationWithDatabaseResult(response, index, codesInput, messageDiv){
+        function updateValidationWithDatabaseResult(response, index, codesInput, messageDiv) {
             let additionalErrors = [];
             let additionalWarnings = [];
-            
+
             if (response.success) {
                 const data = response.data;
-                
-                // Kiểm tra mã không thuộc sản phẩm này
+
+                const codesInBox = [];
+                const validCodes = [];
+
+                if (Array.isArray(data.valid_codes)) {
+                    data.valid_codes.forEach(item => {
+                        if (item.box_barcode) {
+                            codesInBox.push(`${item.code} (box: ${item.box_barcode})`);
+                        } else {
+                            validCodes.push(item.code);
+                        }
+                    });
+                }
+
+                if (codesInBox.length > 0) {
+                    additionalErrors.push(`Mã thuộc thùng đã khóa: ${codesInBox.slice(0, 3).join(', ')}${codesInBox.length > 3 ? ` (+${codesInBox.length - 3} mã khác)` : ''}`);
+                }
+
                 if (data.invalid_codes && data.invalid_codes.length > 0) {
                     additionalErrors.push(`Mã không thuộc sản phẩm này: ${data.invalid_codes.slice(0, 3).join(', ')}${data.invalid_codes.length > 3 ? ` (+${data.invalid_codes.length - 3} mã khác)` : ''}`);
                 }
-                
-                // Kiểm tra mã đã được sử dụng
+
                 if (data.used_codes && data.used_codes.length > 0) {
                     additionalWarnings.push(`Mã đã được sử dụng: ${data.used_codes.slice(0, 3).join(', ')}${data.used_codes.length > 3 ? ` (+${data.used_codes.length - 3} mã khác)` : ''}`);
                 }
-                
-                // Kiểm tra mã không tồn tại trong hệ thống
+
                 if (data.non_existent_codes && data.non_existent_codes.length > 0) {
                     additionalErrors.push(`Mã không tồn tại: ${data.non_existent_codes.slice(0, 3).join(', ')}${data.non_existent_codes.length > 3 ? ` (+${data.non_existent_codes.length - 3} mã khác)` : ''}`);
                 }
-                
-                // Hiển thị thông tin tích cực
+
                 let positiveInfo = '';
-                if (data.valid_codes && data.valid_codes.length > 0) {
-                    positiveInfo = `✅ ${data.valid_codes.length} mã hợp lệ`;
+                if (validCodes.length > 0) {
+                    const preview = validCodes.slice(0, 3).join(', ');
+                    const more = validCodes.length > 3 ? ` (+${validCodes.length - 3} mã khác)` : '';
+                    positiveInfo = `✅ ${validCodes.length} mã hợp lệ: ${preview}${more}`;
                 }
-                
-                // Lấy lại các lỗi/cảnh báo từ validation trước đó (loại bỏ phần database checking)
+
                 const currentMessageText = messageDiv.textContent || messageDiv.innerText;
                 let existingErrors = [];
                 let existingWarnings = [];
-                
-                // Tách các lỗi hiện có (không bao gồm database check)
+
                 if (currentMessageText.includes('❌')) {
                     const errorMatch = currentMessageText.match(/❌\s*(.+?)(?=⚠️|🔍|$)/s);
                     if (errorMatch) {
@@ -3281,8 +3461,7 @@ function render_order_check_single_products_box($post) {
                             .filter(e => e && !e.includes('Kiểm tra mã') && !e.includes('database'));
                     }
                 }
-                
-                // Tách các warning hiện có
+
                 if (currentMessageText.includes('⚠️') && !additionalErrors.length && !existingErrors.length) {
                     const warningMatch = currentMessageText.match(/⚠️\s*(.+?)(?=🔍|$)/s);
                     if (warningMatch) {
@@ -3291,16 +3470,14 @@ function render_order_check_single_products_box($post) {
                             .filter(w => w && !w.includes('Kiểm tra mã') && !w.includes('database'));
                     }
                 }
-                
-                // Kết hợp tất cả lỗi và cảnh báo
+
                 const allErrors = [...existingErrors, ...additionalErrors];
                 const allWarnings = [...existingWarnings, ...additionalWarnings];
-                
-                // Xác định message cuối cùng
+
                 let finalMessage = '';
                 let finalColor = '#28a745';
                 let borderColor = '#28a745';
-                
+
                 if (allErrors.length > 0) {
                     finalMessage = '❌ ' + allErrors.join('<br>• ');
                     finalColor = '#dc3545';
@@ -3315,12 +3492,11 @@ function render_order_check_single_products_box($post) {
                     finalColor = '#28a745';
                     borderColor = '#28a745';
                 }
-                
+
                 messageDiv.innerHTML = `<small style="color: ${finalColor};">${finalMessage}</small>`;
                 codesInput.style.borderColor = borderColor;
-                
+
             } else {
-                // Lỗi từ server
                 let currentMessage = messageDiv.innerHTML;
                 currentMessage = currentMessage.replace(/🔍 Kiểm tra mã với database\.\.\./g, '');
                 messageDiv.innerHTML = currentMessage + '<br><small style="color: #dc3545;">❌ ' + (response.data || 'Lỗi kiểm tra') + '</small>';
@@ -3328,286 +3504,32 @@ function render_order_check_single_products_box($post) {
             }
         }
 
-        function checkDuplicateWithOtherSingleProductsImproved(currentIndex, currentCodes) {
-            const duplicates = [];
-            const allSingleRows = document.querySelectorAll('#single_products_table tbody tr');
-            
-            allSingleRows.forEach((row, rowPosition) => {
-                // Lấy index từ nhiều nguồn để đảm bảo
-                let rowIndex = row.getAttribute('data-single-index');
-                if (!rowIndex || rowIndex === '__index__' || rowIndex === null) {
-                    rowIndex = rowPosition; // Fallback to position in table
-                } else {
-                    rowIndex = parseInt(rowIndex);
-                }
-                
-                // Debug log
-                console.log(`Checking row ${rowPosition}: data-single-index="${row.getAttribute('data-single-index')}", calculated index=${rowIndex}, current=${currentIndex}`);
-                
-                // Chỉ so sánh với các row khác (không phải row hiện tại)
-                if (rowIndex === parseInt(currentIndex)) {
-                    console.log(`Skipping row ${rowIndex} - same as current ${currentIndex}`);
-                    return;
-                }
-                
-                const otherCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                if (!otherCodesInput) return;
-                
-                const otherCodes = otherCodesInput.value.trim();
-                if (!otherCodes) return;
-                
-                const otherCodesList = otherCodes.split(/[\n,;]+/)
-                    .map(code => code.trim())
-                    .filter(code => code);
-                
-                // Tìm mã trùng lặp
-                currentCodes.forEach(code => {
-                    if (otherCodesList.includes(code)) {
-                        duplicates.push(code);
-                        console.log(`Found duplicate code "${code}" between row ${currentIndex} and row ${rowIndex}`);
-                    }
-                });
-            });
-            
-            const uniqueDuplicates = [...new Set(duplicates)];
-            console.log(`Total duplicates found for row ${currentIndex}:`, uniqueDuplicates);
-            return uniqueDuplicates;
-        }
-
-        function checkDuplicateWithBulkProductsImproved(codes){
-            const duplicates = [];
-            // Lấy tất cả mã từ product codes display của bulk products
-            document.querySelectorAll('[id^="product_codes_"]').forEach(div => {
-                if (div.id.includes('single_')) return; // Bỏ qua single product messages
-                
-                const text = div.textContent || div.innerText;
-                const lines = text.split('\n');
-                
-                lines.forEach(line => {
-                    const cleanLine = line.trim();
-                    // Kiểm tra nếu line này chứa mã barcode (format chuẩn, không phải text mô tả)
-                    if (cleanLine && 
-                        !/[➤✅⚠️❌Tổng Thùng hợp lệ:]/i.test(cleanLine) && 
-                        /^[A-Z0-9]+$/i.test(cleanLine) &&
-                        cleanLine.length >= 6) { // Giả sử mã barcode ít nhất 6 ký tự
-                        
-                        codes.forEach(code => {
-                            if (cleanLine === code) {
-                                duplicates.push(code);
-                            }
-                        });
-                    }
-                });
-            });
-            
-            return [...new Set(duplicates)];
-        }
-        
-        // Kiểm tra sản phẩm trùng với bulk products
-        function checkSameProductInBulk(productId) {
-            const bulkRows = document.querySelectorAll('#order_check_products_table tbody tr');
-            
-            for (let row of bulkRows) {
-                const bulkProductSelect = row.querySelector('select[name*="[product_id]"]');
-                if (bulkProductSelect && bulkProductSelect.value == productId) {
-                    // Return thông tin sản phẩm trùng, không phải boolean
-                    const productName = bulkProductSelect.options[bulkProductSelect.selectedIndex].text;
-                    return {
-                        found: true,
-                        productName: productName,
-                        productId: productId
-                    };
-                }
-            }
-            
-            return { found: false };
-        }
-
-        window.debugSameProductCheck = function(productId) {
-            console.log('🔍 Checking same product in bulk for ID:', productId);
-            
-            const result = checkSameProductInBulk(productId);
-            console.log('Result:', result);
-            
-            if (result.found) {
-                console.log('✅ Found same product in bulk:', result.productName);
-                console.log('Should show warning?', shouldShowSameProductWarning(productId));
-            } else {
-                console.log('❌ No same product found in bulk');
-            }
-            
-            // Business rules check
-            const businessRules = validateBusinessRules(productId, [], 1);
-            console.log('Business rules validation:', businessRules);
-        };
-
-        function shouldShowSameProductWarning(productId) {
-            
-            const bulkProductInfo = checkSameProductInBulk(productId);
-            if (!bulkProductInfo.found) {
-                return false;
-            }
-            
-            // Ví dụ logic: chỉ warning nếu cùng tỉnh/kênh
-            const currentProvince = document.querySelector('[name="order_check_province"]')?.value;
-            const currentChannel = document.querySelector('[name="order_check_channel"]')?.value;
-            
-            // Nếu không có thông tin tỉnh/kênh, không warning
-            if (!currentProvince || !currentChannel) {
-                return false;
-            }
-            return false;
-        }
-
-        // Check duplicate with other single products
-        function checkDuplicateWithOtherSingleProducts(currentIndex, codes) {
-            const duplicates = [];
-            const allSingleRows = document.querySelectorAll('#single_products_table tbody tr');
-            
-            allSingleRows.forEach((row) => {
-                const rowIndex = row.getAttribute('data-single-index');
-                if (rowIndex == currentIndex) return;
-                
-                const otherCodesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                if (!otherCodesInput) return;
-                
-                const otherCodes = otherCodesInput.value.trim();
-                if (!otherCodes) return;
-                
-                const otherCodesList = otherCodes.split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                
-                codes.forEach(code => {
-                    if (otherCodesList.includes(code)) {
-                        duplicates.push(code);
-                    }
-                });
-            });
-            
-            return [...new Set(duplicates)];
-        }
-
-        // Check duplicate with bulk products
-        function checkDuplicateWithBulkProducts(codes) {
-            const duplicates = [];
-            
-            // Lấy tất cả mã từ product codes display của bulk products
-            document.querySelectorAll('[id^="product_codes_"]').forEach(div => {
-                if (div.id.includes('single_')) return; // Bỏ qua single product messages
-                
-                const text = div.textContent || div.innerText;
-                // Tìm các mã barcode trong text (giả sử format là chữ và số)
-                const lines = text.split('\n');
-                lines.forEach(line => {
-                    const cleanLine = line.trim();
-                    // Kiểm tra nếu line này chứa mã barcode (không phải text mô tả)
-                    if (cleanLine && !/[➤✅⚠️❌]/.test(cleanLine) && /^[A-Z0-9]+$/i.test(cleanLine)) {
-                        codes.forEach(code => {
-                            if (cleanLine === code) {
-                                duplicates.push(code);
-                            }
-                        });
-                    }
-                });
-            });
-            
-            return [...new Set(duplicates)];
-        }
-
-        // Validate all single products
-        function validateAllSingleProducts() {
-            const rows = document.querySelectorAll('#single_products_table tbody tr');
+        function updateSingleProductsSummary() {
             let totalProducts = 0;
-            let validProducts = 0;
-            let totalErrors = 0;
-            let allDuplicates = [];
+            let totalCodes = 0;
             
+            const rows = document.querySelectorAll('#single_products_table tbody tr');
             rows.forEach((row) => {
-                const index = row.getAttribute('data-single-index');
-                if (index !== null) {
+                const productSelect = row.querySelector('select[name*="[product_id]"]');
+                const codesInput = row.querySelector('textarea[name*="[product_codes]"]');
+                
+                if (productSelect && productSelect.value) {
                     totalProducts++;
-                    validateSingleProduct(parseInt(index));
                     
-                    const messageDiv = document.getElementById(`single_message_${index}`);
-                    if (messageDiv) {
-                        if (messageDiv.textContent.includes('✅')) {
-                            validProducts++;
-                        } else if (messageDiv.textContent.includes('❌')) {
-                            totalErrors++;
-                        }
-                        
-                        if (messageDiv.textContent.includes('Trùng')) {
-                            const codesInput = row.querySelector('textarea[name*="[product_codes]"]');
-                            const nameInput = row.querySelector('input[name*="[product_name]"]');
-                            if (codesInput && nameInput) {
-                                const codes = codesInput.value.trim().split(/[\n,;]+/).map(code => code.trim()).filter(code => code);
-                                const productName = nameInput.value.trim();
-                                
-                                const duplicatesWithBulk = checkDuplicateWithBulkProducts(codes);
-                                const duplicatesWithOther = checkDuplicateWithOtherSingleProducts(parseInt(index), codes);
-                                
-                                if (duplicatesWithBulk.length > 0 || duplicatesWithOther.length > 0) {
-                                    allDuplicates.push({
-                                        productName: productName,
-                                        duplicatesWithBulk: duplicatesWithBulk,
-                                        duplicatesWithOther: duplicatesWithOther
-                                    });
-                                }
-                            }
-                        }
+                    if (codesInput && codesInput.value.trim()) {
+                        const codes = codesInput.value.trim().split(/[\n,;]+/).filter(code => code.trim());
+                        totalCodes += codes.length;
                     }
                 }
             });
             
-            // Cập nhật summary
-            // const summaryDiv = document.getElementById('single_validation_summary');
-            // if (summaryDiv) {
-            //     if (totalProducts === 0) {
-            //         summaryDiv.innerHTML = '💡 Chưa có sản phẩm lẻ nào';
-            //         summaryDiv.style.color = '#666';
-            //     } else {
-            //         summaryDiv.innerHTML = `📊 ${validProducts}/${totalProducts} hợp lệ`;
-            //         if (totalErrors > 0) {
-            //             summaryDiv.innerHTML += ` • <span style="color: #dc3545;">${totalErrors} lỗi</span>`;
-            //             summaryDiv.style.color = '#dc3545';
-            //         } else {
-            //             summaryDiv.style.color = '#28a745';
-            //         }
-            //     }
-            // }
+            document.getElementById('single_total_count').textContent = totalCodes.toLocaleString();
             
-            // Hiển thị bảng tổng kết trùng lặp
-            const duplicateSummary = document.getElementById('duplicate_summary');
-            const duplicateDetails = document.getElementById('duplicate_details');
-            
-            if (allDuplicates.length > 0) {
-                let duplicateHtml = '<table class="widefat" style="font-size: 12px;"><thead><tr><th>Sản phẩm lẻ</th><th>Trùng với thùng</th><th>Trùng với lẻ khác</th></tr></thead><tbody>';
-                
-                allDuplicates.forEach(item => {
-                    duplicateHtml += '<tr>';
-                    duplicateHtml += `<td><strong>${item.productName}</strong></td>`;
-                    duplicateHtml += `<td>${item.duplicatesWithBulk.length > 0 ? item.duplicatesWithBulk.join(', ') : '-'}</td>`;
-                    duplicateHtml += `<td>${item.duplicatesWithOther.length > 0 ? item.duplicatesWithOther.join(', ') : '-'}</td>`;
-                    duplicateHtml += '</tr>';
-                });
-                
-                duplicateHtml += '</tbody></table>';
-                duplicateDetails.innerHTML = duplicateHtml;
-                duplicateSummary.style.display = 'block';
-            } else {
-                duplicateSummary.style.display = 'none';
-            }
-            
-            // Hiển thị thông báo tổng kết
-            if (totalProducts === 0) {
-                showTemporaryMessage('💡 Chưa có sản phẩm lẻ nào để kiểm tra', 'warning');
-            } else if (totalErrors > 0) {
-                showTemporaryMessage(`❌ Có ${totalErrors}/${totalProducts} sản phẩm lẻ cần sửa lỗi`, 'error');
-            } else {
-                showTemporaryMessage(`✅ Tất cả ${totalProducts} sản phẩm lẻ đều hợp lệ!`, 'success');
+            if (typeof updateOrderSummary === 'function') {
+                updateOrderSummary();
             }
         }
 
-        // Show temporary message function
         function showTemporaryMessage(message, type = 'info') {
             const colorMap = {
                 'success': '#4caf50',
@@ -3616,7 +3538,6 @@ function render_order_check_single_products_box($post) {
                 'info': '#2196f3'
             };
             
-            // Remove existing messages
             document.querySelectorAll('.temporary-message').forEach(msg => msg.remove());
             
             const messageDiv = document.createElement('div');
@@ -3647,13 +3568,20 @@ function render_order_check_single_products_box($post) {
             }, 4000);
         }
 
-        // Initialize existing single products
+        // Initialize when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('#single_products_table tbody tr').forEach((row) => {
                 const index = row.getAttribute('data-single-index');
-                if (index !== null) {
-                    initSingleProductEventListeners(parseInt(index));
-                    validateSingleProduct(parseInt(index));
+                if (index !== null && index !== '__index__') {
+                    initSingleProductEventListenersEnhanced(parseInt(index));
+                    
+                    // Check if this product has allowBulkConflict set
+                    const allowInput = row.querySelector('input[name*="[allow_bulk_conflict]"]');
+                    if (allowInput && allowInput.value === '1') {
+                        allowBulkConflicts[index] = true;
+                    }
+                    
+                    validateSingleProductEnhanced(parseInt(index));
                 }
             });
             
@@ -3665,14 +3593,19 @@ function render_order_check_single_products_box($post) {
             document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(() => {
                     updateSingleProductsSummary();
-                    validateAllSingleProducts();
+                    validateAllSingleProductsEnhanced();
                 }, 500);
             });
         } else {
             setTimeout(() => {
                 updateSingleProductsSummary();
-                validateAllSingleProducts();
+                validateAllSingleProductsEnhanced();
             }, 500);
+        }
+
+        // Provide nonce for AJAX calls
+        if (typeof window.validateCodesNonce === 'undefined') {
+            window.validateCodesNonce = '<?php echo wp_create_nonce("validate_codes_nonce"); ?>';
         }
     </script>
     
@@ -3700,37 +3633,61 @@ function render_order_check_single_products_box($post) {
         }
         
         #single_products_table input,
-        #single_products_table textarea {
-            transition: border-color 0.3s ease;
+        #single_products_table textarea,
+        #single_products_table select {
+            transition: border-color 0.3s ease, background-color 0.3s ease;
         }
         
         #single_products_table input:focus,
-        #single_products_table textarea:focus {
+        #single_products_table textarea:focus,
+        #single_products_table select:focus {
             outline: none;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }
         
         .single-product-message {
-            max-height: 60px;
+            max-height: 80px;
             overflow-y: auto;
             line-height: 1.3;
+            word-wrap: break-word;
         }
         
-        #duplicate_summary table th {
-            background: #f8f9fa;
-            font-weight: bold;
-            padding: 8px;
+        #bulk_conflict_warning {
+            animation: fadeInDown 0.3s ease;
         }
         
-        #duplicate_summary table td {
-            padding: 6px 8px;
-            border-top: 1px solid #dee2e6;
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* Error states */
+        .error-state {
+            border-color: #dc3545 !important;
+            background-color: #fff5f5 !important;
+        }
+        
+        .warning-state {
+            border-color: #ffc107 !important;
+            background-color: #fff9e6 !important;
+        }
+        
+        .success-state {
+            border-color: #28a745 !important;
+            background-color: #f8fff8 !important;
         }
     </style>
     <?php
 }
 
-function render_single_product_row_improved($product_id = '', $quantity = '', $product_codes = '', $index = '__index__', $lot_name = '', $lot_date = '') {
+// 3. Enhanced render single product row function
+function render_single_product_row_enhanced($product_id = '', $quantity = '', $product_codes = '', $index = '__index__', $lot_name = '', $lot_date = '', $allow_bulk_conflict = false) {
     global $wpdb;
     $all_products = wc_get_products(['limit' => -1]);
     
@@ -3757,6 +3714,9 @@ function render_single_product_row_improved($product_id = '', $quantity = '', $p
                     </option>
                 <?php endforeach; ?>
             </select>
+            <?php if ($allow_bulk_conflict): ?>
+                <input type="hidden" name="order_check_single_products[<?php echo $index; ?>][allow_bulk_conflict]" value="1" />
+            <?php endif; ?>
         </td>
         <td>
             <input type="number" 
@@ -3797,27 +3757,27 @@ function render_single_product_row_improved($product_id = '', $quantity = '', $p
                 <?php endif; ?>
             </select>
         </td>
-       <td>
+        <td>
             <input type="date" 
-                name="order_check_single_products[<?php echo $index; ?>][lot_date]" 
-                id="single_date_input_<?php echo esc_attr($index); ?>" 
-                class="single-date-input" 
-                data-index="<?php echo esc_attr($index); ?>" 
-                value="<?php echo esc_attr($lot_date); ?>"
-                style="width: 100%;"
-                required />
+                   name="order_check_single_products[<?php echo $index; ?>][lot_date]" 
+                   id="single_date_input_<?php echo esc_attr($index); ?>" 
+                   class="single-date-input" 
+                   data-index="<?php echo esc_attr($index); ?>" 
+                   value="<?php echo esc_attr($lot_date); ?>"
+                   style="width: 100%;"
+                   required />
         </td>
         <td>
             <textarea name="order_check_single_products[<?php echo $index; ?>][product_codes]" 
-                class="single-product-codes"
-                data-index="<?php echo $index; ?>"
-                rows="4" 
-                placeholder="Nhập mã sản phẩm, mỗi dòng 1 mã"
-                style="width: 100%;" 
-                required><?php echo esc_textarea($product_codes); ?></textarea>
+                      class="single-product-codes"
+                      data-index="<?php echo $index; ?>"
+                      rows="4" 
+                      placeholder="Nhập mã sản phẩm, mỗi dòng 1 mã"
+                      style="width: 100%;" 
+                      required><?php echo esc_textarea($product_codes); ?></textarea>
         </td>
         <td>
-            <div id="single_message_<?php echo $index; ?>" class="single-product-message" style="font-size: 12px; max-width: 250px; max-height: 80px; overflow-y: auto;">
+            <div id="single_message_<?php echo $index; ?>" class="single-product-message" style="font-size: 12px; max-width: 200px;">
                 <em style="color: #666;">💡 Nhập đầy đủ thông tin</em>
             </div>
         </td>
@@ -3825,13 +3785,6 @@ function render_single_product_row_improved($product_id = '', $quantity = '', $p
             <button type="button" class="button remove-single-row" title="Xóa sản phẩm này">✕</button>
         </td>
     </tr>
-    
-    <script>
-        // Cung cấp nonce cho AJAX calls
-        if (typeof window.validateCodesNonce === 'undefined') {
-            window.validateCodesNonce = '<?php echo wp_create_nonce("validate_codes_nonce"); ?>';
-        }
-    </script>
     <?php
     return ob_get_clean();
 }
@@ -4130,57 +4083,54 @@ function handle_validate_single_product_codes() {
         wp_send_json_error('Nonce verification failed');
         return;
     }
-    
+
     global $wpdb;
     $barcode_table = BIZGPT_PLUGIN_WP_BARCODE;
-    
+
     $codes = isset($_POST['codes']) ? $_POST['codes'] : [];
     $custom_prod_id = sanitize_text_field($_POST['custom_prod_id']);
     $product_name = sanitize_text_field($_POST['product_name']);
-    
+
     if (empty($codes) || empty($custom_prod_id)) {
         wp_send_json_error('Thiếu thông tin cần thiết');
         return;
     }
-    
-    $valid_codes = [];           // Mã hợp lệ và có thể sử dụng
-    $invalid_codes = [];         // Mã không thuộc sản phẩm này
-    $used_codes = [];           // Mã đã được sử dụng
-    $non_existent_codes = [];   // Mã không tồn tại trong hệ thống
-    
+
+    $valid_codes = [];
+    $invalid_codes = [];
+    $used_codes = [];
+    $non_existent_codes = [];
+
     foreach ($codes as $code) {
         $code = trim($code);
         if (empty($code)) continue;
-        
-        // Kiểm tra mã có tồn tại trong bảng barcode không
+
         $barcode_info = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $barcode_table WHERE barcode = %s",
+            "SELECT barcode, product_id, status, box_barcode FROM $barcode_table WHERE barcode = %s",
             $code
         ));
-        
+
         if (!$barcode_info) {
-            // Mã không tồn tại trong hệ thống
             $non_existent_codes[] = $code;
             continue;
         }
-        
-        // Kiểm tra mã có thuộc sản phẩm này không
+
         if ($barcode_info->product_id !== $custom_prod_id) {
             $invalid_codes[] = $code;
             continue;
         }
-        
-        // Kiểm tra trạng thái mã
-        if ($barcode_info->status == 'used') {
+
+        if ($barcode_info->status === 'used') {
             $used_codes[] = $code;
             continue;
         }
-        
-        // Mã hợp lệ
-        $valid_codes[] = $code;
+
+        $valid_codes[] = [
+            'code' => $code,
+            'box_barcode' => $barcode_info->box_barcode ?: null
+        ];
     }
-    
-    // Tạo response với thông tin chi tiết
+
     $response_data = [
         'valid_codes' => $valid_codes,
         'invalid_codes' => $invalid_codes,
@@ -4194,15 +4144,14 @@ function handle_validate_single_product_codes() {
             'non_existent_count' => count($non_existent_codes)
         ]
     ];
-    
-    // Log để debug
+
     error_log('Validate Single Product Codes Result: ' . json_encode([
         'product_name' => $product_name,
         'custom_prod_id' => $custom_prod_id,
         'codes_count' => count($codes),
         'summary' => $response_data['summary']
     ]));
-    
+
     wp_send_json_success($response_data);
     wp_die();
 }
@@ -4257,7 +4206,7 @@ function disable_update_button_for_completed_orders() {
             }
             
             // Disable toàn bộ form để ngăn chỉnh sửa
-            $('#post input, #post textarea, #post select').prop('disabled', true);
+            // $('#post input:not(#post_status), #post textarea, #post select:not(#post_status)').prop('disabled', true);
             
             // Disable các nút thêm/xóa sản phẩm
             $('.button').each(function() {

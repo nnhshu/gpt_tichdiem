@@ -6,15 +6,28 @@ function gpt_render_lot_page() {
 
     // Xử lý thêm lô mới
     if (isset($_POST['add_lot'])) {
-        $result = $wpdb->insert($table, [
-            'lot_name'       => sanitize_text_field($_POST['lot_name']),
-            'product_id'     => sanitize_text_field($_POST['product_id']),
-        ]);
+        $lot_name = sanitize_text_field($_POST['lot_name']);
+        $product_id = sanitize_text_field($_POST['product_id']);
         
-        if ($result !== false) {
-            echo '<div class="notice notice-success is-dismissible"><p>✅ Đã thêm lô sản phẩm mới.</p></div>';
+        // Kiểm tra lot_name đã tồn tại chưa
+        $existing_lot = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table WHERE lot_name = %s",
+            $lot_name
+        ));
+        
+        if ($existing_lot > 0) {
+            echo '<div class="notice notice-error is-dismissible"><p>❌ Tên lô đã tồn tại. Vui lòng chọn tên khác.</p></div>';
         } else {
-            echo '<div class="notice notice-error is-dismissible"><p>❌ Có lỗi xảy ra khi thêm lô.</p></div>';
+            $result = $wpdb->insert($table, [
+                'lot_name'   => $lot_name,
+                'product_id' => $product_id,
+            ]);
+            
+            if ($result !== false) {
+                echo '<div class="notice notice-success is-dismissible"><p>✅ Đã thêm lô sản phẩm mới.</p></div>';
+            } else {
+                echo '<div class="notice notice-error is-dismissible"><p>❌ Có lỗi xảy ra khi thêm lô.</p></div>';
+            }
         }
     }
 
@@ -31,15 +44,29 @@ function gpt_render_lot_page() {
 
     // Xử lý cập nhật lô
     if (isset($_POST['edit_lot_id'])) {
-        $result = $wpdb->update($table, [
-            'lot_name'       => sanitize_text_field($_POST['lot_name']),
-            'product_id'     => sanitize_text_field($_POST['product_id']),
-        ], ['id' => intval($_POST['edit_lot_id'])]);
-
-        if ($result !== false) {
-            echo '<div class="notice notice-success is-dismissible"><p>✏️ Đã cập nhật lô sản phẩm.</p></div>';
+        $lot_name = sanitize_text_field($_POST['lot_name']);
+        $product_id = sanitize_text_field($_POST['product_id']);
+        $edit_lot_id = intval($_POST['edit_lot_id']);
+        
+        // Kiểm tra lot_name đã tồn tại chưa (trừ record hiện tại)
+        $existing_lot = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table WHERE lot_name = %s AND id != %d",
+            $lot_name, $edit_lot_id
+        ));
+        
+        if ($existing_lot > 0) {
+            echo '<div class="notice notice-error is-dismissible"><p>❌ Tên lô đã tồn tại. Vui lòng chọn tên khác.</p></div>';
         } else {
-            echo '<div class="notice notice-error is-dismissible"><p>❌ Có lỗi xảy ra khi cập nhật lô.</p></div>';
+            $result = $wpdb->update($table, [
+                'lot_name'   => $lot_name,
+                'product_id' => $product_id,
+            ], ['id' => $edit_lot_id]);
+
+            if ($result !== false) {
+                echo '<div class="notice notice-success is-dismissible"><p>✏️ Đã cập nhật lô sản phẩm.</p></div>';
+            } else {
+                echo '<div class="notice notice-error is-dismissible"><p>❌ Có lỗi xảy ra khi cập nhật lô.</p></div>';
+            }
         }
     }
 
@@ -78,8 +105,9 @@ function gpt_render_lot_page() {
                 <hr>
                 <form method="post">
                     <div class="form-group">
-                        <label for="lot_name">Tên lô:</label>
-                        <input type="text" name="lot_name" id="lot_name" placeholder="Nhập tên lô" class="regular-text" required value="<?= esc_attr($edit_data->lot_name ?? '') ?>">
+                        <label for="lot_name">Tên lô: <span style="color: red;">*</span></label>
+                        <input type="text" name="lot_name" id="lot_name" placeholder="Nhập tên lô (phải là duy nhất)" class="regular-text" required value="<?= esc_attr($edit_data->lot_name ?? '') ?>">
+                        <p class="description">Tên lô phải là duy nhất trong hệ thống.</p>
                     </div>
                     
                     <div class="form-group">
@@ -191,4 +219,4 @@ function get_product_name_by_custom_id($custom_prod_id) {
     } else {
         echo $custom_prod_id;
     }
-} 
+}
